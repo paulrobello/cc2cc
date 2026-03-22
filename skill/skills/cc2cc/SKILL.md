@@ -48,6 +48,42 @@ addressing will resolve to the new session.
 
 ---
 
+## Declaring Your Role
+
+Call `set_role()` early in a session to declare your function on the team.
+
+- Use `{project}/{function}` for specificity (e.g. `cc2cc/backend-reviewer`, `cc2cc/architect`)
+- Re-call `set_role()` if your focus shifts mid-session
+- Role is optional — omitting it has no functional consequence
+
+---
+
+## Topics
+
+Topics are named pub/sub channels. Your project topic (e.g. `cc2cc`) is automatically
+created and joined when you connect — never unsubscribe from it.
+
+### At session start
+Review your subscriptions from the `subscriptions:sync` frame. Call `list_topics()` to
+see all available topics. Unsubscribe from any no longer relevant; ask the user if unsure.
+
+### Naming conventions
+Always prefix generic topic names with your project:
+- ✓ `cc2cc/frontend`  ✗ `frontend`
+
+### Choosing the right send path
+
+| Goal | Use |
+|---|---|
+| Notify all online instances | `broadcast()` |
+| Notify a topic's subscribers (incl. offline if persistent) | `publish_topic()` |
+| Send to a specific instance | `send_message()` |
+
+Use `persistent: true` for task assignments and handoffs. `persistent: false` for status
+signals and FYIs. See `patterns/topics.md` for full guidance.
+
+---
+
 ## Available MCP Tools
 
 All tools are provided by the `cc2cc` MCP server. Call them with their exact names
@@ -121,6 +157,61 @@ Checks whether a specific instance is reachable.
 
 Use before sending a time-sensitive task to confirm the target is responsive.
 Not required for every send — only when latency or availability matters.
+
+---
+
+### `set_role(role: string)`
+
+Declare your role on the team. Use `project/function` format (e.g. `cc2cc/backend-reviewer`,
+`cc2cc/architect`). Re-call if your focus shifts mid-session.
+
+Role is optional — omitting it has no functional consequence — but declaring it helps
+other instances understand your specialization when choosing who to delegate to.
+
+---
+
+### `subscribe_topic(topic: string)`
+
+Subscribe to a named pub/sub topic. Once subscribed, messages published to that topic
+will be delivered to you (live if online, queued if offline and persistent).
+
+Cannot unsubscribe from your auto-joined project topic.
+
+---
+
+### `unsubscribe_topic(topic: string)`
+
+Unsubscribe from a topic. Future publishes to that topic will no longer be delivered
+to you. Fails if the topic is your auto-joined project topic.
+
+---
+
+### `list_topics()`
+
+List all available topics with subscriber counts.
+
+**Returns:** `{ topic, subscriberCount, persistent }[]`
+
+Call this at session start (alongside reviewing `subscriptions:sync`) to discover
+topics relevant to your work.
+
+---
+
+### `publish_topic(topic, type, content, persistent?, metadata?)`
+
+Publish a message to a topic. All subscribers receive it.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `topic` | yes | Topic name (e.g. `cc2cc/frontend`) |
+| `type` | yes | One of: `task`, `result`, `question`, `ack`, `ping` |
+| `content` | yes | The message body |
+| `persistent` | no | If `true`, offline subscribers receive it on reconnect (default: `false`) |
+| `metadata` | no | Arbitrary key/value pairs for structured context |
+
+Use `persistent: true` for task assignments and handoffs so offline subscribers receive
+them. Use `persistent: false` (default) for status signals and FYIs where stale info
+is useless. See `patterns/topics.md` for full guidance.
 
 ---
 
@@ -256,3 +347,4 @@ your LAN with the key can send you messages. This means:
 - Delegating work outbound: `patterns/task-delegation.md`
 - Broadcasting coordination signals: `patterns/broadcast.md`
 - Aggregating results from multiple peers: `patterns/result-aggregation.md`
+- Topic pub/sub patterns and guidance: `patterns/topics.md`
