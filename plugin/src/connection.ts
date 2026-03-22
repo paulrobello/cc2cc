@@ -127,7 +127,12 @@ export class HubConnection extends EventEmitter {
 
     this.ws.on("message", (raw) => {
       try {
-        const parsed = JSON.parse(raw.toString());
+        const parsed = JSON.parse(raw.toString()) as Record<string, unknown>;
+        // Hub push frames arrive without a requestId — handle before correlator
+        if (parsed.action === "subscriptions:sync") {
+          this.emit("subscriptions:sync", parsed.topics);
+          return;
+        }
         this.emit("message", parsed);
       } catch {
         // Non-JSON frame — ignore silently; hub should never send these

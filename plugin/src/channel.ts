@@ -31,6 +31,7 @@ export async function emitChannelNotification(
         type: message.type,
         message_id: message.messageId,
         reply_to: message.replyToMessageId ?? "",
+        ...(message.topicName ? { topic: message.topicName } : {}),
       },
     },
   });
