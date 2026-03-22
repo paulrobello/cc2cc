@@ -45,7 +45,7 @@ export function MessageFeed({ feed, filterInstanceId }: MessageFeedProps) {
   }, [filtered.length, autoScroll]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-1 min-h-0 flex-col">
       {/* Filter strip */}
       <div
         className="flex items-center gap-px px-2 py-1.5"
