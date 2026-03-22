@@ -96,6 +96,7 @@ export default function CommandCenterPage() {
           />
           <ManualSendBar
             instances={instanceList}
+            topics={topicList}
             disabled={connectionState !== "online"}
             onError={(err) => console.error("Failed to send message:", err)}
           />

@@ -12,11 +12,12 @@ import {
 } from "@/components/ui/select";
 import { shortInstanceId } from "@/lib/utils";
 import { MessageType } from "@cc2cc/shared";
-import type { InstanceState } from "@/types/dashboard";
+import type { InstanceState, TopicState } from "@/types/dashboard";
 import { useWs } from "@/hooks/use-ws";
 
 interface ManualSendBarProps {
   instances: InstanceState[];
+  topics: TopicState[];
   disabled: boolean;
   onError?: (err: unknown) => void;
 }
@@ -30,13 +31,15 @@ const MESSAGE_TYPES = [
 
 export function ManualSendBar({
   instances,
+  topics,
   disabled,
   onError,
 }: ManualSendBarProps) {
-  const { sendMessage, sendBroadcast } = useWs();
+  const { sendMessage, sendBroadcast, sendPublishTopic } = useWs();
   const [to, setTo] = useState<string>("broadcast");
   const [messageType, setMessageType] = useState<MessageType>(MessageType.task);
   const [content, setContent] = useState("");
+  const [persistent, setPersistent] = useState(false);
 
   async function handleSend() {
     const trimmed = content.trim();
@@ -44,6 +47,8 @@ export function ManualSendBar({
     try {
       if (to === "broadcast") {
         await sendBroadcast(messageType, trimmed);
+      } else if (to.startsWith("topic:")) {
+        await sendPublishTopic(to.slice("topic:".length), messageType, trimmed, persistent);
       } else {
         await sendMessage(to, messageType, trimmed);
       }
@@ -88,25 +93,38 @@ export function ManualSendBar({
           <SelectContent
             style={{ background: "#0d1f38", border: "1px solid #1a3356" }}
           >
-            <SelectItem
-              value="broadcast"
-              className="font-mono text-[11px]"
-              style={{ color: "#a855f7" }}
-            >
-              ⬡ broadcast (all online)
-            </SelectItem>
-            {instances.map((inst) => (
-              <SelectItem
-                key={inst.instanceId}
-                value={inst.instanceId}
-                disabled={inst.status === "offline"}
-                className="font-mono text-[11px]"
-                style={{ color: inst.status === "offline" ? "#3a5470" : "#6b8aaa" }}
-              >
-                {shortInstanceId(inst.instanceId)}
-                {inst.status === "offline" && " (offline)"}
+            {/* Topics group */}
+            <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-widest" style={{ color: "#2a5480" }}>Topics</div>
+            {[...topics].sort((a, b) => a.name.localeCompare(b.name)).map((t) => (
+              <SelectItem key={`topic:${t.name}`} value={`topic:${t.name}`}
+                className="font-mono text-[11px]" style={{ color: "#a855f7" }}>
+                ◈ {t.name} ({t.subscriberCount})
               </SelectItem>
             ))}
+            {/* Online group */}
+            <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-widest" style={{ color: "#2a5480" }}>Online</div>
+            <SelectItem value="broadcast" className="font-mono text-[11px]" style={{ color: "#a855f7" }}>
+              ⬡ broadcast (all online)
+            </SelectItem>
+            {instances.filter((i) => i.status === "online")
+              .sort((a, b) => a.instanceId.localeCompare(b.instanceId))
+              .map((inst) => (
+                <SelectItem key={inst.instanceId} value={inst.instanceId}
+                  className="font-mono text-[11px]" style={{ color: "#6b8aaa" }}>
+                  {shortInstanceId(inst.instanceId)}
+                  {inst.role && ` [${inst.role}]`}
+                </SelectItem>
+              ))}
+            {/* Offline group */}
+            <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-widest" style={{ color: "#2a5480" }}>Offline</div>
+            {instances.filter((i) => i.status === "offline")
+              .sort((a, b) => a.instanceId.localeCompare(b.instanceId))
+              .map((inst) => (
+                <SelectItem key={inst.instanceId} value={inst.instanceId} disabled
+                  className="font-mono text-[11px]" style={{ color: "#3a5470" }}>
+                  {shortInstanceId(inst.instanceId)} (offline)
+                </SelectItem>
+              ))}
           </SelectContent>
         </Select>
 
@@ -168,22 +186,31 @@ export function ManualSendBar({
             e.currentTarget.style.boxShadow = "none";
           }}
         />
-        <button
-          type="button"
-          onClick={() => void handleSend()}
-          disabled={!canSend}
-          aria-label="Send message"
-          className="flex w-9 shrink-0 items-center justify-center transition-all duration-150"
-          style={{
-            background: canSend ? "rgba(0,212,255,0.12)" : "#0d1f38",
-            border: `1px solid ${canSend ? "#00d4ff" : "#1a3356"}`,
-            color: canSend ? "#00d4ff" : "#2a5480",
-            boxShadow: canSend ? "0 0 8px rgba(0,212,255,0.2)" : "none",
-            cursor: canSend ? "pointer" : "not-allowed",
-          }}
-        >
-          <Send className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex flex-col items-end gap-1.5">
+          {to.startsWith("topic:") && (
+            <label className="flex items-center gap-1.5 font-mono text-[10px]" style={{ color: "#6b8aaa" }}>
+              <input type="checkbox" checked={persistent} onChange={(e) => setPersistent(e.target.checked)} />
+              persistent
+            </label>
+          )}
+          <button
+            type="button"
+            onClick={() => void handleSend()}
+            disabled={!canSend}
+            aria-label="Send message"
+            className="flex w-9 shrink-0 items-center justify-center transition-all duration-150"
+            style={{
+              background: canSend ? "rgba(0,212,255,0.12)" : "#0d1f38",
+              border: `1px solid ${canSend ? "#00d4ff" : "#1a3356"}`,
+              color: canSend ? "#00d4ff" : "#2a5480",
+              boxShadow: canSend ? "0 0 8px rgba(0,212,255,0.2)" : "none",
+              cursor: canSend ? "pointer" : "not-allowed",
+              height: "2.25rem",
+            }}
+          >
+            <Send className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );
