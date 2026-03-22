@@ -48,6 +48,50 @@ const InstanceRemovedEventSchema = z.object({
 	timestamp: z.string().datetime(),
 });
 
+const TopicCreatedEventSchema = z.object({
+	event: z.literal("topic:created"),
+	name: z.string().min(1),
+	createdBy: z.string().min(1),
+	timestamp: z.string().datetime(),
+});
+
+const TopicDeletedEventSchema = z.object({
+	event: z.literal("topic:deleted"),
+	name: z.string().min(1),
+	timestamp: z.string().datetime(),
+});
+
+const TopicSubscribedEventSchema = z.object({
+	event: z.literal("topic:subscribed"),
+	name: z.string().min(1),
+	instanceId: z.string().min(1),
+	timestamp: z.string().datetime(),
+});
+
+const TopicUnsubscribedEventSchema = z.object({
+	event: z.literal("topic:unsubscribed"),
+	name: z.string().min(1),
+	instanceId: z.string().min(1),
+	timestamp: z.string().datetime(),
+});
+
+const TopicMessageEventSchema = z.object({
+	event: z.literal("topic:message"),
+	name: z.string().min(1),
+	message: MessageSchema,
+	persistent: z.boolean(),
+	delivered: z.number().int().min(0),
+	queued: z.number().int().min(0),
+	timestamp: z.string().datetime(),
+});
+
+const InstanceRoleUpdatedEventSchema = z.object({
+	event: z.literal("instance:role_updated"),
+	instanceId: z.string().min(1),
+	role: z.string().min(1),
+	timestamp: z.string().datetime(),
+});
+
 /** Discriminated union of all events the hub emits to WebSocket clients */
 export const HubEventSchema = z.discriminatedUnion("event", [
 	InstanceJoinedEventSchema,
@@ -57,6 +101,12 @@ export const HubEventSchema = z.discriminatedUnion("event", [
 	QueueStatsEventSchema,
 	InstanceSessionUpdatedEventSchema,
 	InstanceRemovedEventSchema,
+	TopicCreatedEventSchema,
+	TopicDeletedEventSchema,
+	TopicSubscribedEventSchema,
+	TopicUnsubscribedEventSchema,
+	TopicMessageEventSchema,
+	InstanceRoleUpdatedEventSchema,
 ]);
 
 export type HubEvent = z.infer<typeof HubEventSchema>;
@@ -69,3 +119,9 @@ export type InstanceSessionUpdatedEvent = z.infer<
 	typeof InstanceSessionUpdatedEventSchema
 >;
 export type InstanceRemovedEvent = z.infer<typeof InstanceRemovedEventSchema>;
+export type TopicCreatedEvent = z.infer<typeof TopicCreatedEventSchema>;
+export type TopicDeletedEvent = z.infer<typeof TopicDeletedEventSchema>;
+export type TopicSubscribedEvent = z.infer<typeof TopicSubscribedEventSchema>;
+export type TopicUnsubscribedEvent = z.infer<typeof TopicUnsubscribedEventSchema>;
+export type TopicMessageEvent = z.infer<typeof TopicMessageEventSchema>;
+export type InstanceRoleUpdatedEvent = z.infer<typeof InstanceRoleUpdatedEventSchema>;
