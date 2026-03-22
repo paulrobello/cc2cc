@@ -1,5 +1,6 @@
 // hub/tests/api.test.ts
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
+import type { TopicInfo } from "@cc2cc/shared";
 
 // Mock dependencies before importing api
 const registryMock = {
@@ -29,6 +30,8 @@ const registryMock = {
     },
   ]),
   setQueueDepth: mock(() => {}),
+  get: mock(() => undefined as unknown),
+  getWsRef: mock(() => undefined as unknown),
 };
 const queueMock = {
   getMessagesTodayCount: mock(async () => 42),
@@ -42,19 +45,50 @@ const configMock = {
   config: { apiKey: "test-key", port: 3100, redisUrl: "redis://localhost:6379" },
 };
 
+// Mock topicManager
+const topicManagerMock = {
+  listTopics: mock(async () => [] as TopicInfo[]),
+  createTopic: mock(async () => ({ name: "cc2cc", createdAt: "2026-01-01T00:00:00.000Z", createdBy: "test", subscriberCount: 0 } as TopicInfo)),
+  deleteTopic: mock(async () => {}),
+  subscribe: mock(async () => {}),
+  unsubscribe: mock(async () => {}),
+  getSubscribers: mock(async () => [] as string[]),
+  getTopicsForInstance: mock(async () => [] as string[]),
+  topicExists: mock(async () => true),
+  publishToTopic: mock(async () => ({ delivered: 0, queued: 0 })),
+};
+
 mock.module("../src/registry.js", () => ({ registry: registryMock }));
 mock.module("../src/queue.js", () => queueMock);
 mock.module("../src/redis.js", () => redisMock);
 mock.module("../src/config.js", () => configMock);
+mock.module("../src/topic-manager.js", () => ({
+  topicManager: topicManagerMock,
+  parseProject: (id: string) => id.split(":")[1]?.split("/")[0] ?? id,
+}));
+
+// Mock ws-handler (api.ts calls emitToDashboards)
+mock.module("../src/ws-handler.js", () => ({
+  emitToDashboards: mock(() => {}),
+  dashboardClients: new Set(),
+}));
 
 const { buildApiRoutes } = await import("../src/api.js");
 import { Hono } from "hono";
+
+const KEY = "test-key";
 
 function makeApp() {
   const app = new Hono();
   buildApiRoutes(app);
   return app;
 }
+
+const app = makeApp();
+
+beforeEach(() => {
+  Object.values(topicManagerMock).forEach((m) => (m as ReturnType<typeof mock>).mockClear?.());
+});
 
 describe("GET /health", () => {
   it("returns 200 without key — endpoint is publicly accessible per spec", async () => {
@@ -121,5 +155,81 @@ describe("DELETE /api/queue/:id", () => {
     });
     expect(res.status).toBe(200);
     expect(queueMock.flushQueue).toHaveBeenCalledWith("alice@srv:api/a");
+  });
+});
+
+describe("GET /api/topics", () => {
+  it("returns 200 with topic list", async () => {
+    topicManagerMock.listTopics.mockResolvedValue([
+      { name: "cc2cc", createdAt: "2026-01-01T00:00:00.000Z", createdBy: "alice@srv:cc2cc/abc", subscriberCount: 1 },
+    ]);
+    const res = await app.request(`/api/topics?key=${KEY}`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as unknown[];
+    expect(body).toHaveLength(1);
+  });
+});
+
+describe("GET /api/topics/:name/subscribers", () => {
+  it("returns 404 when topic does not exist", async () => {
+    topicManagerMock.topicExists.mockResolvedValue(false);
+    const res = await app.request(`/api/topics/missing/subscribers?key=${KEY}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("returns subscriber list for existing topic", async () => {
+    topicManagerMock.topicExists.mockResolvedValue(true);
+    topicManagerMock.getSubscribers.mockResolvedValue(["alice@srv:cc2cc/abc"]);
+    const res = await app.request(`/api/topics/cc2cc/subscribers?key=${KEY}`);
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("POST /api/topics", () => {
+  it("creates and returns a TopicInfo", async () => {
+    const res = await app.request(`/api/topics?key=${KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "cc2cc" }),
+    });
+    expect(res.status).toBe(200);
+    expect(topicManagerMock.createTopic).toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /api/topics/:name", () => {
+  it("returns 404 when topic does not exist", async () => {
+    topicManagerMock.topicExists.mockResolvedValue(false);
+    const res = await app.request(`/api/topics/missing?key=${KEY}`, { method: "DELETE" });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 409 when topic has subscribers", async () => {
+    topicManagerMock.topicExists.mockResolvedValue(true);
+    topicManagerMock.getSubscribers.mockResolvedValue(["alice@srv:cc2cc/abc"]);
+    const res = await app.request(`/api/topics/cc2cc?key=${KEY}`, { method: "DELETE" });
+    expect(res.status).toBe(409);
+  });
+
+  it("deletes and returns { deleted: true, name }", async () => {
+    topicManagerMock.topicExists.mockResolvedValue(true);
+    topicManagerMock.getSubscribers.mockResolvedValue([]);
+    const res = await app.request(`/api/topics/cc2cc?key=${KEY}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { deleted: boolean; name: string };
+    expect(body.deleted).toBe(true);
+    expect(body.name).toBe("cc2cc");
+  });
+});
+
+describe("POST /api/topics/:name/publish", () => {
+  it("returns 404 when topic does not exist", async () => {
+    topicManagerMock.topicExists.mockResolvedValue(false);
+    const res = await app.request(`/api/topics/missing/publish?key=${KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "hi", type: "task" }),
+    });
+    expect(res.status).toBe(404);
   });
 });
