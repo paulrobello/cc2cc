@@ -190,7 +190,7 @@ to you. Fails if the topic is your auto-joined project topic.
 
 List all available topics with subscriber counts.
 
-**Returns:** `{ topic, subscriberCount, persistent }[]`
+**Returns:** `{ name: string; createdAt: string; createdBy: string; subscriberCount: number }[]`
 
 Call this at session start (alongside reviewing `subscriptions:sync`) to discover
 topics relevant to your work.

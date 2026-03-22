@@ -89,9 +89,9 @@ No build step — all other workspaces import directly from TypeScript source vi
 
 | Module | Contents |
 |--------|----------|
-| `types.ts` | `MessageType` enum, `Message` interface, `InstanceInfo` interface |
+| `types.ts` | `MessageType` enum, `Message` interface, `InstanceInfo` interface (with optional `role` field), `TopicInfo` interface |
 | `schema.ts` | Zod schemas for all message shapes and MCP tool inputs; uses `z.nativeEnum(MessageType)` for enum alignment |
-| `events.ts` | `HubEvent` discriminated union — all event types emitted to dashboard clients |
+| `events.ts` | `HubEvent` discriminated union — all event types emitted to dashboard clients, including topic and role events |
 
 > **Note:** Zod version is pinned to `^3`. Do not upgrade to v4 — it is incompatible with the shared schemas.
 
@@ -107,21 +107,24 @@ No build step — all other workspaces import directly from TypeScript source vi
 | `registry.ts` | In-memory `Map` of live connections + Redis presence TTLs (24 h) |
 | `queue.ts` | RPOPLPUSH-based at-least-once delivery; max 1000 msgs/queue; daily stats counter (`stats:messages:today`) with EXPIREAT midnight UTC |
 | `broadcast.ts` | `BroadcastManager`: in-memory fan-out + per-instance 5 s rate limiter |
+| `topic-manager.ts` | Pub/sub topic lifecycle (create, delete, subscribe, unsubscribe, publish); persistent topic messages queued to offline subscribers; project topic auto-joined on connect |
 | `ws-handler.ts` | Plugin/dashboard WS lifecycle; message routing; emits `HubEvent` to `dashboardClients` set |
 | `api.ts` | REST handlers; `GET /health` is the only unauthenticated endpoint; all others require `?key=` |
+| `redis.ts` | Redis client setup and health check helper |
+| `validation.ts` | Shared validation constants (e.g. `INSTANCE_ID_RE`) |
 
 ---
 
 ### plugin
 
-**Purpose:** MCP stdio server that connects to the hub and exposes five Claude Code tools. One instance runs per Claude Code session.
+**Purpose:** MCP stdio server that connects to the hub and exposes ten Claude Code tools. One instance runs per Claude Code session.
 
 | Module | Responsibility |
 |--------|---------------|
 | `config.ts` | Assembles `instanceId` from env vars; reads Claude session ID from `.claude/.cc2cc-session-id` (written by `SessionStart` hook), falling back to random UUIDv4 |
 | `connection.ts` | `HubConnection`: WS client using the `ws` package; exponential backoff (1 s → ×2 → 30 s max); `request()` method with 10 s timeout |
 | `channel.ts` | Converts hub `message:sent` events into `notifications/claude/channel` MCP notifications with `source: "cc2cc"` in meta |
-| `tools.ts` | Five MCP tools — `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping` |
+| `tools.ts` | Ten MCP tools — `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic` |
 
 **Instance ID format:**
 
@@ -184,9 +187,9 @@ The UUID is generated once per browser session (stored in `sessionStorage`) and 
 Install via: `claude plugin add ./skill`
 
 The skill includes:
-- `SKILL.md` — collaboration protocol documentation loaded into Claude Code context
-- `plugin.json` — MCP server manifest pointing to the `plugin/` server
-- `patterns/` — reusable patterns for task delegation, broadcast, and result aggregation
+- `skills/cc2cc/SKILL.md` — collaboration protocol documentation loaded into Claude Code context
+- `.claude-plugin/plugin.json` — MCP server manifest pointing to the `plugin/` server
+- `skills/cc2cc/patterns/` — reusable patterns: task delegation, broadcast, result aggregation, and topics
 - `hooks/` — `SessionStart` hook that writes the Claude session ID to `.claude/.cc2cc-session-id` for stable instance identity
 
 ---
@@ -241,6 +244,10 @@ All frames are JSON objects with an `action` field. Every request frame carries 
 | `broadcast` | `{ type, content, metadata?, requestId }` | `{ requestId, delivered }` |
 | `get_messages` | `{ limit?, requestId }` | `{ requestId, messages[] }` |
 | `session_update` | `{ oldInstanceId, newInstanceId, requestId }` | `{ requestId, migrated }` |
+| `set_role` | `{ role, requestId }` | `{ requestId, instanceId, role }` |
+| `subscribe_topic` | `{ topic, requestId }` | `{ requestId, topic, subscribed: true }` |
+| `unsubscribe_topic` | `{ topic, requestId }` | `{ requestId, topic, unsubscribed: true }` or `{ requestId, error }` |
+| `publish_topic` | `{ topic, type, content, persistent?, metadata?, requestId }` | `{ requestId, delivered, queued }` |
 
 Inbound messages from the hub arrive as MCP `notifications/claude/channel` notifications:
 
@@ -260,9 +267,15 @@ Dashboards connect to `/ws/dashboard?key=<KEY>` and receive a stream of `HubEven
 | `instance:left` | `{ instanceId, timestamp }` | Plugin disconnects |
 | `instance:removed` | `{ instanceId, timestamp }` | Instance deleted via `DELETE /api/instances/:id` |
 | `instance:session_updated` | `{ oldInstanceId, newInstanceId, migrated, timestamp }` | Plugin session ID changes (e.g. `/clear`) |
+| `instance:role_updated` | `{ instanceId, role, timestamp }` | Instance calls `set_role` |
 | `message:sent` | `{ message, timestamp }` | Direct message routed by the hub |
 | `broadcast:sent` | `{ from, content, timestamp }` | Broadcast sent to all online instances |
 | `queue:stats` | `{ instanceId, depth, timestamp }` | Queue depth change for an instance |
+| `topic:created` | `{ name, createdBy, timestamp }` | New topic created |
+| `topic:deleted` | `{ name, timestamp }` | Topic deleted |
+| `topic:subscribed` | `{ name, instanceId, timestamp }` | Instance subscribes to a topic |
+| `topic:unsubscribed` | `{ name, instanceId, timestamp }` | Instance unsubscribes from a topic |
+| `topic:message` | `{ name, message, persistent, delivered, queued, timestamp }` | Message published to a topic |
 
 ---
 
@@ -276,10 +289,18 @@ All endpoints require `?key=<CC2CC_HUB_API_KEY>` except `GET /health`.
 | `GET` | `/api/instances` | List all registered instances with status and queue depth |
 | `GET` | `/api/stats` | Current message stats (total today, active instances, queued messages) |
 | `GET` | `/api/messages/:id` | Stub — returns 404; use the WS event stream to build a local message index |
+| `GET` | `/api/ping/:id` | Check liveness of an instance; returns `{ online, latency? }` |
 | `DELETE` | `/api/instances/:id` | Remove an offline instance and flush its queue; returns 409 if instance is online |
 | `DELETE` | `/api/queue/:id` | Flush an instance's Redis queue without removing the registry entry |
+| `GET` | `/api/topics` | List all topics with subscriber counts |
+| `POST` | `/api/topics` | Create a topic (idempotent) |
+| `DELETE` | `/api/topics/:name` | Delete a topic; returns 409 if it has subscribers |
+| `GET` | `/api/topics/:name/subscribers` | List subscribers for a topic |
+| `POST` | `/api/topics/:name/subscribe` | Subscribe an instance to a topic |
+| `POST` | `/api/topics/:name/unsubscribe` | Unsubscribe an instance from a topic |
+| `POST` | `/api/topics/:name/publish` | Publish a message to a topic |
 
-> **Note:** There are no REST endpoints for sending messages, broadcasts, or ping. All message delivery and identity-dependent operations go through the plugin WebSocket connection.
+> **Note:** There are no REST endpoints for `send_message` or `broadcast`. All direct message delivery and identity-dependent operations go through the plugin WebSocket connection. The Topics API is available via both REST and WS.
 
 ---
 
@@ -339,7 +360,8 @@ There are no REST endpoints for `send_message` or `broadcast`. The hub's REST AP
 
 - [README.md](../README.md) — Quick start, configuration, and installation
 - [Documentation Style Guide](DOCUMENTATION_STYLE_GUIDE.md) — Standards for all project documentation
-- [cc2cc Skill](../skill/cc2cc.md) — Full collaboration protocol for Claude Code instances
-- [Task Delegation Pattern](../skill/patterns/task-delegation.md) — How to delegate work to peer instances
-- [Broadcast Pattern](../skill/patterns/broadcast.md) — When and how to use broadcast messaging
-- [Result Aggregation Pattern](../skill/patterns/result-aggregation.md) — Collecting results from multiple peers
+- [cc2cc Skill](../skill/skills/cc2cc/SKILL.md) — Full collaboration protocol for Claude Code instances
+- [Task Delegation Pattern](../skill/skills/cc2cc/patterns/task-delegation.md) — How to delegate work to peer instances
+- [Broadcast Pattern](../skill/skills/cc2cc/patterns/broadcast.md) — When and how to use broadcast messaging
+- [Result Aggregation Pattern](../skill/skills/cc2cc/patterns/result-aggregation.md) — Collecting results from multiple peers
+- [Topics Pattern](../skill/skills/cc2cc/patterns/topics.md) — Pub/sub topic messaging between instances

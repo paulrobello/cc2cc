@@ -1,7 +1,25 @@
 # cc2cc — Claude-to-Claude Communications System
+
+Design specification for the cc2cc hub-and-spoke messaging system. Covers architecture, component design, REST/WebSocket APIs, and deployment.
+
 **Date:** 2026-03-21
 **Status:** Approved
 **Author:** Paul Robello
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Technology Stack](#technology-stack)
+- [Monorepo Structure](#monorepo-structure)
+- [Component Designs](#component-designs)
+  - [Hub](#1-hub-hub)
+  - [MCP Plugin](#2-mcp-plugin-plugin)
+  - [Skill](#3-skill-skill)
+  - [Dashboard](#4-dashboard-dashboard)
+- [Docker Compose](#docker-compose)
+- [Security](#security)
+- [Out of Scope (v1)](#out-of-scope-v1)
 
 ---
 
@@ -13,18 +31,24 @@ cc2cc is a Claude-to-Claude communications system that enables multiple Claude C
 
 ## Architecture
 
-```
-Claude Code Instances (each running the cc2cc plugin)
-  paul@macbook:cc2cc/session_a    paul@macbook:harness/session_b    alice@server:api/session_c
-         |                                    |                               |
-         └──────── WebSocket (?key= query param auth) ───────────────────────┘
-                                              |
-                                        comms-hub (Bun + Hono)
-                                         Redis message queues
-                                              |
-                                   WebSocket event stream
-                                              |
-                               Next.js Dashboard (port 8030)
+```mermaid
+graph TD
+    A["paul@macbook:cc2cc/session_a<br/>(cc2cc plugin)"]
+    B["paul@macbook:harness/session_b<br/>(cc2cc plugin)"]
+    C["alice@server:api/session_c<br/>(cc2cc plugin)"]
+    Hub["comms-hub<br/>Bun + Hono · port 3100<br/>Redis message queues"]
+    Dashboard["Next.js Dashboard<br/>port 8029"]
+
+    A -- "WebSocket (?key= auth)" --> Hub
+    B -- "WebSocket (?key= auth)" --> Hub
+    C -- "WebSocket (?key= auth)" --> Hub
+    Hub -- "WebSocket event stream" --> Dashboard
+
+    style A fill:#4a148c,stroke:#9c27b0,stroke-width:2px,color:#ffffff
+    style B fill:#4a148c,stroke:#9c27b0,stroke-width:2px,color:#ffffff
+    style C fill:#4a148c,stroke:#9c27b0,stroke-width:2px,color:#ffffff
+    style Hub fill:#e65100,stroke:#ff9800,stroke-width:3px,color:#ffffff
+    style Dashboard fill:#0d47a1,stroke:#2196f3,stroke-width:2px,color:#ffffff
 ```
 
 **Instance ID format:** `username@host:project/session_uuid`
@@ -62,11 +86,15 @@ cc2cc/
 ├── hub/                      # Bun + Hono server — port 3100
 │   └── src/
 │       ├── index.ts          # entry point
+│       ├── config.ts         # env config (CC2CC_HUB_PORT, CC2CC_HUB_API_KEY, CC2CC_REDIS_URL)
 │       ├── registry.ts       # instance registration & presence
 │       ├── queue.ts          # Redis message queue operations
 │       ├── ws-handler.ts     # WebSocket connection management (plugin + dashboard)
 │       ├── broadcast.ts      # fire-and-forget fan-out
-│       └── api.ts            # REST endpoints (health, admin)
+│       ├── topic-manager.ts  # pub/sub topic management
+│       ├── redis.ts          # Redis client & health check
+│       ├── validation.ts     # shared request validation helpers
+│       └── api.ts            # REST endpoints (health, admin, topics)
 ├── plugin/                   # MCP server — stdio transport
 │   └── src/
 │       ├── index.ts          # MCP server entry, capability declaration
@@ -74,12 +102,13 @@ cc2cc/
 │       ├── tools.ts          # MCP tool handlers
 │       ├── channel.ts        # inbound message → Claude channel notification
 │       └── config.ts         # env config (hub URL, api key, instance id, uuid)
-├── dashboard/                # Next.js — port 8030
+├── dashboard/                # Next.js — port 8029
 │   └── src/
 │       ├── app/
 │       │   ├── page.tsx          # Command Center (View A — default)
 │       │   ├── analytics/        # Analytics View (B)
-│       │   └── conversations/    # Conversation View (C)
+│       │   ├── conversations/    # Conversation View (C)
+│       │   └── topics/           # Topics View (D)
 │       └── components/
 │           ├── instance-sidebar/ # live instance list with online/offline status
 │           ├── message-feed/     # real-time typed message stream
@@ -115,7 +144,7 @@ The hub exposes two WebSocket upgrade paths:
 
 **`/ws/dashboard`** — for the Next.js dashboard (browser client)
 - Auth via query parameter: `ws://hub:3100/ws/dashboard?key=<api_key>`
-- The API key is stored in `NEXT_PUBLIC_HUB_API_KEY`. This makes it visible in the browser bundle — acceptable for LAN-only deployment where the network is trusted, but should be noted explicitly. Do not use this pattern for public deployments.
+- The API key is stored in `NEXT_PUBLIC_CC2CC_HUB_API_KEY`. This makes it visible in the browser bundle — acceptable for LAN-only deployment where the network is trusted, but should be noted explicitly. Do not use this pattern for public deployments.
 
 > **Why not `Sec-WebSocket-Protocol` header?** The plugin is a Bun subprocess (not a browser) so query-param auth is simpler and more robust. Browsers support query params on WebSocket URLs without restriction, so the dashboard can use the same pattern. The `Sec-WebSocket-Protocol` approach is fragile when the key contains special characters and adds parsing complexity with no security benefit on a trusted LAN.
 
@@ -164,23 +193,39 @@ Broadcasts are **fire-and-forget** — they are **not queued in Redis** and are 
 #### WebSocket Events (hub → dashboard)
 
 ```ts
-{ event: 'instance:joined',  instanceId: string, timestamp: string }
-{ event: 'instance:left',    instanceId: string, timestamp: string }
-{ event: 'message:sent',     message: Message, timestamp: string }
-{ event: 'broadcast:sent',   from: string, content: string, timestamp: string }
-{ event: 'queue:stats',      instanceId: string, depth: number }
+{ event: 'instance:joined',         instanceId: string, timestamp: string }
+{ event: 'instance:left',           instanceId: string, timestamp: string }
+{ event: 'instance:removed',        instanceId: string, timestamp: string }
+{ event: 'instance:session_updated', oldInstanceId: string, newInstanceId: string, migrated: number, timestamp: string }
+{ event: 'instance:role_updated',   instanceId: string, role: string, timestamp: string }
+{ event: 'message:sent',            message: Message, timestamp: string }
+{ event: 'broadcast:sent',          from: string, content: string, timestamp: string }
+{ event: 'queue:stats',             instanceId: string, depth: number, timestamp: string }
+{ event: 'topic:created',           name: string, createdBy: string, timestamp: string }
+{ event: 'topic:deleted',           name: string, timestamp: string }
+{ event: 'topic:subscribed',        name: string, instanceId: string, timestamp: string }
+{ event: 'topic:unsubscribed',      name: string, instanceId: string, timestamp: string }
+{ event: 'topic:message',           name: string, message: Message, persistent: boolean, delivered: number, queued: number, timestamp: string }
 ```
 
 #### REST Endpoints
 
-All REST endpoints require `?key=<api_key>` query parameter — same shared key as WebSocket auth. `DELETE /api/queue/:id` is a destructive admin operation; the LAN trust boundary is acknowledged but auth is still enforced.
+All REST endpoints except `/health` require `?key=<api_key>` — same shared key as WebSocket auth. Destructive admin operations are still auth-enforced even on a trusted LAN.
 
 ```
-GET    /health                → { status, connectedInstances, redisOk, uptime }          (requires ?key=)
-GET    /api/instances         → list all instances (online and offline) with status field  (requires ?key=)
-GET    /api/stats             → { messagesToday, activeInstances, queuedTotal }            (requires ?key=)
-GET    /api/messages/:id      → fetch message by ID (dashboard inspector)                  (requires ?key=)
-DELETE /api/queue/:id         → flush a queue (admin)                                      (requires ?key=)
+GET    /health                          → { status, connectedInstances, redisOk, uptime }         (no auth)
+GET    /api/instances                   → list all instances (online + offline) with status field  (requires ?key=)
+GET    /api/stats                       → { messagesToday, activeInstances, queuedTotal }          (requires ?key=)
+GET    /api/messages/:id                → stub — returns 404 in v1; use WS event stream           (requires ?key=)
+DELETE /api/instances/:id               → remove offline instance from registry                    (requires ?key=)
+DELETE /api/queue/:id                   → flush a queue (admin)                                    (requires ?key=)
+GET    /api/topics                      → list all topics                                          (requires ?key=)
+GET    /api/topics/:name/subscribers    → list subscribers for a topic                             (requires ?key=)
+POST   /api/topics                      → create topic (idempotent)                                (requires ?key=)
+DELETE /api/topics/:name                → delete topic (fails if subscribers exist)                (requires ?key=)
+POST   /api/topics/:name/subscribe      → subscribe an instance to a topic                         (requires ?key=)
+POST   /api/topics/:name/unsubscribe    → unsubscribe an instance from a topic                     (requires ?key=)
+POST   /api/topics/:name/publish        → publish a message to all topic subscribers               (requires ?key=)
 ```
 
 > `GET /api/instances` returns **both online and offline instances** with a `status: 'online' | 'offline'` field. This allows the dashboard and skill to address offline peers by instance ID.
@@ -188,9 +233,9 @@ DELETE /api/queue/:id         → flush a queue (admin)                         
 #### Configuration (`.env`)
 
 ```
-HUB_PORT=3100
-HUB_API_KEY=<shared secret>
-REDIS_URL=redis://localhost:6379
+CC2CC_HUB_PORT=3100
+CC2CC_HUB_API_KEY=<shared secret>
+CC2CC_REDIS_URL=redis://localhost:6379
 ```
 
 ---
@@ -377,7 +422,7 @@ On <channel source="cc2cc" type="result"> with known reply_to:
 ### 4. Dashboard (`dashboard/`)
 
 **Framework:** Next.js (latest stable), Tailwind CSS (latest), shadcn/ui
-**Port:** 8030
+**Port:** 8029
 **Real-time:** WebSocket to `ws://hub:3100/ws/dashboard?key=<key>`
 
 #### WebSocket Reconnect (ws-provider)
@@ -416,6 +461,12 @@ Exponential backoff: initial 1s, multiplier 2x, cap 30s. Show connection-state b
   - Messages grouped by `replyToMessageId` to show task → ack → result threads
 - Right panel: message metadata inspector (type, messageId, replyToMessageId, timestamp, metadata)
 
+**View D — Topics**
+- Create, delete, and inspect pub/sub topics
+- Subscribe/unsubscribe instances to topics
+- Publish messages to topics (persistent or fire-and-forget)
+- Live updates via `topic:*` WS events
+
 ---
 
 ## Docker Compose
@@ -426,20 +477,22 @@ services:
   redis:
     image: redis:alpine
     ports: ["6379:6379"]
+    command: redis-server --requirepass ${CC2CC_REDIS_PASSWORD:-changeme}
   hub:
     build: ./hub
-    ports: ["3100:3100"]
+    ports: ["${CC2CC_HUB_PORT:-3100}:3100"]
     environment:
-      REDIS_URL: redis://redis:6379
-      HUB_API_KEY: ${HUB_API_KEY}
+      CC2CC_REDIS_URL: redis://:${CC2CC_REDIS_PASSWORD:-changeme}@redis:6379
+      CC2CC_HUB_API_KEY: ${CC2CC_HUB_API_KEY}
+      CC2CC_HUB_PORT: 3100
     depends_on: [redis]
   dashboard:
     build: ./dashboard
-    ports: ["8030:8030"]
-    environment:
+    ports: ["8029:8029"]
+    build_args:
       # Use the host's LAN IP — browser clients cannot resolve Docker-internal hostnames
-      NEXT_PUBLIC_HUB_WS_URL: ws://${HOST_LAN_IP:-localhost}:3100
-      NEXT_PUBLIC_HUB_API_KEY: ${HUB_API_KEY}
+      NEXT_PUBLIC_CC2CC_HUB_WS_URL: ws://${CC2CC_HOST_LAN_IP:-localhost}:3100
+      NEXT_PUBLIC_CC2CC_HUB_API_KEY: ${CC2CC_HUB_API_KEY}
     depends_on: [hub]
 ```
 
@@ -451,14 +504,14 @@ services:
     ports: ["6379:6379"]
 ```
 
-> **LAN access note:** Set `HOST_LAN_IP` in `.env` to your machine's LAN IP (e.g. `192.168.1.10`) so dashboard clients on other devices can reach the hub WebSocket. Localhost is the correct default for single-machine development.
+> **LAN access note:** Set `CC2CC_HOST_LAN_IP` in `.env` to your machine's LAN IP (e.g. `192.168.1.10`) so dashboard clients on other devices can reach the hub WebSocket. Localhost is the correct default for single-machine development.
 
 ---
 
 ## Security
 
 - **Auth:** Shared API key passed as `?key=` query parameter on all WebSocket connections (plugin and dashboard)
-- **Key exposure:** `NEXT_PUBLIC_HUB_API_KEY` is visible in the browser bundle. Acceptable for LAN-only deployment on a trusted network. Do not use this pattern for public deployments.
+- **Key exposure:** `NEXT_PUBLIC_CC2CC_HUB_API_KEY` is visible in the browser bundle. Acceptable for LAN-only deployment on a trusted network. Do not use this pattern for public deployments.
 - **Scope:** LAN deployment — hub should not be exposed to the public internet
 - **Prompt injection:** The skill instructs Claude to treat inbound messages as peer requests, not user instructions — Claude applies normal judgment before acting on any received content
 - **Broadcast rate limit:** One broadcast per instance per 5 seconds — enforced at the hub; prevents accidental flooding
@@ -474,3 +527,13 @@ services:
 - Cloud / remote deployment (LAN only)
 - Plugin marketplace submission (use `--dangerously-load-development-channels` during development)
 - Delivery to offline instances for broadcasts (fire-and-forget, online only)
+
+---
+
+## Related Documentation
+
+- [CLAUDE.md](../../CLAUDE.md) — Project commands, architecture invariants, and development workflow
+- [packages/shared/src/types.ts](../../packages/shared/src/types.ts) — Canonical `Message`, `InstanceInfo`, and `MessageType` definitions
+- [packages/shared/src/events.ts](../../packages/shared/src/events.ts) — Full `HubEvent` discriminated union
+- [hub/src/api.ts](../../hub/src/api.ts) — REST endpoint implementations
+- [hub/src/topic-manager.ts](../../hub/src/topic-manager.ts) — Topic pub/sub implementation

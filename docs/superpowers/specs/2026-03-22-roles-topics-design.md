@@ -307,7 +307,7 @@ Returns: `{ topic: string; subscribed: true }`
 Returns: `{ topic: string; unsubscribed: true }` or throws `"cannot unsubscribe from auto-joined project topic"`.
 
 **`list_topics()`** — REST `GET /api/topics`. No side effects.
-Returns: `TopicInfo[]`
+Returns: `TopicInfo[]` — `{ name: string; createdAt: string; createdBy: string; subscriberCount: number }[]`
 
 **`publish_topic(topic, type, content, persistent?, metadata?)`** — WS `action: "publish_topic"`. `persistent` defaults to `false`.
 Returns: `{ delivered: number; queued: number }`
@@ -354,6 +354,8 @@ topics: Map<string, TopicInfo & { subscribers: string[] }>
 sendPublishTopic(topic: string, type: MessageType, content: string, persistent: boolean, metadata?: Record<string, unknown>): Promise<void>
 ```
 The `WsContext` default value must be updated with empty/no-op stubs for these fields.
+
+Note: `sendPublishTopic` is implemented via REST (`POST /api/topics/:name/publish`) rather than the plugin WS. The dashboard sends `from: dashboardInstanceId` explicitly in the request body. This is consistent with the REST endpoint's `from` semantics (see Hub Layer section).
 
 **New HubEvent handlers:**
 - `topic:created` → add entry to `topics` Map
