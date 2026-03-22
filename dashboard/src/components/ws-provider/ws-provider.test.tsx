@@ -57,6 +57,12 @@ jest.mock("@/lib/api", () => ({
 }));
 
 beforeEach(() => {
+  // Mock global fetch for seedTopics (GET /api/topics)
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: jest.fn().mockResolvedValue([]),
+  }) as unknown as typeof fetch;
+
   global.WebSocket = MockWebSocket as unknown as typeof WebSocket;
   MockWebSocket.instances = [];
   jest.useFakeTimers();

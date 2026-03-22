@@ -1,8 +1,12 @@
 // dashboard/src/types/dashboard.ts
-import type { Message, InstanceInfo, MessageType } from "@cc2cc/shared";
+import type { Message, InstanceInfo, MessageType, TopicInfo } from "@cc2cc/shared";
 
 /** Connection state driven by the WsProvider reconnect logic */
 export type ConnectionState = "online" | "reconnecting" | "disconnected";
+
+export interface TopicState extends TopicInfo {
+  subscribers: string[];
+}
 
 /**
  * A message as it appears in the feed — enriches the base Message with
@@ -15,6 +19,8 @@ export interface FeedMessage {
   receivedAt: Date;
   /** True when this message was sent via the broadcast fan-out path */
   isBroadcast: boolean;
+  /** Topic name if this message was delivered via a topic subscription */
+  topicName?: string;
 }
 
 /** Live per-instance state maintained by WsProvider */
@@ -44,10 +50,20 @@ export interface WsContextValue {
   sessionStats: SessionStats;
   /** The dashboard's own registered instanceId (dashboard@host:dashboard/uuid) */
   dashboardInstanceId: string;
+  /** All known topics, keyed by topic name */
+  topics: Map<string, TopicState>;
   /** Send a direct message to a specific instance via the plugin WS. */
   sendMessage: (to: string, type: MessageType, content: string) => Promise<void>;
   /** Broadcast to all online instances via the plugin WS. */
   sendBroadcast: (type: MessageType, content: string) => Promise<void>;
+  /** Publish a message to a topic via the hub REST API. */
+  sendPublishTopic: (
+    topic: string,
+    type: MessageType,
+    content: string,
+    persistent: boolean,
+    metadata?: Record<string, unknown>,
+  ) => Promise<void>;
 }
 
 /** Shape returned by GET /api/stats */

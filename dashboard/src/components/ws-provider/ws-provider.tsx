@@ -14,8 +14,10 @@ import type {
   FeedMessage,
   InstanceState,
   SessionStats,
+  TopicState,
   WsContextValue,
 } from "@/types/dashboard";
+import type { TopicInfo } from "@cc2cc/shared";
 import { fetchInstances } from "@/lib/api";
 
 /** Maximum number of messages retained in the feed */
@@ -55,10 +57,14 @@ export const WsContext = createContext<WsContextValue>({
   feed: [],
   sessionStats: { activeTasks: 0, errors: 0, pendingTaskIds: new Set() },
   dashboardInstanceId: "",
+  topics: new Map(),
   sendMessage: async () => {
     throw new Error("WsProvider not mounted");
   },
   sendBroadcast: async () => {
+    throw new Error("WsProvider not mounted");
+  },
+  sendPublishTopic: async () => {
     throw new Error("WsProvider not mounted");
   },
 });
@@ -75,6 +81,8 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
     errors: 0,
     pendingTaskIds: new Set(),
   });
+
+  const [topics, setTopics] = useState<Map<string, TopicState>>(new Map());
 
   // Stable dashboard identity — lazy initializer runs once per mount
   const [dashboardInstanceId] = useState(() => initDashboardInstanceId());
@@ -107,6 +115,22 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             queueDepth: inst.queueDepth ?? 0,
           });
         }
+      }
+      return next;
+    });
+  }, []);
+
+  const seedTopics = useCallback(async () => {
+    const hubHttpUrl = (process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100")
+      .replace(/^wss?:\/\//, (m) => (m === "wss://" ? "https://" : "http://"));
+    const apiKey = process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "";
+    const res = await fetch(`${hubHttpUrl}/api/topics?key=${encodeURIComponent(apiKey)}`);
+    if (!res.ok || !mountedRef.current) return;
+    const list = await res.json() as TopicInfo[];
+    setTopics((prev) => {
+      const next = new Map(prev);
+      for (const t of list) {
+        if (!next.has(t.name)) next.set(t.name, { ...t, subscribers: [] });
       }
       return next;
     });
@@ -227,6 +251,59 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             return next;
           });
           break;
+
+        case "instance:role_updated":
+          setInstances((prev) => {
+            const next = new Map(prev);
+            const existing = next.get(evt.instanceId);
+            if (existing) next.set(evt.instanceId, { ...existing, role: evt.role });
+            return next;
+          });
+          break;
+
+        case "topic:created":
+          setTopics((prev) => {
+            const next = new Map(prev);
+            if (!next.has(evt.name)) {
+              next.set(evt.name, { name: evt.name, createdAt: evt.timestamp, createdBy: evt.createdBy, subscriberCount: 0, subscribers: [] });
+            }
+            return next;
+          });
+          break;
+
+        case "topic:deleted":
+          setTopics((prev) => {
+            const next = new Map(prev);
+            next.delete(evt.name);
+            return next;
+          });
+          break;
+
+        case "topic:subscribed":
+          setTopics((prev) => {
+            const next = new Map(prev);
+            const t = next.get(evt.name);
+            if (t && !t.subscribers.includes(evt.instanceId)) {
+              next.set(evt.name, { ...t, subscriberCount: t.subscriberCount + 1, subscribers: [...t.subscribers, evt.instanceId] });
+            }
+            return next;
+          });
+          break;
+
+        case "topic:unsubscribed":
+          setTopics((prev) => {
+            const next = new Map(prev);
+            const t = next.get(evt.name);
+            if (t) {
+              next.set(evt.name, { ...t, subscriberCount: Math.max(0, t.subscriberCount - 1), subscribers: t.subscribers.filter((id) => id !== evt.instanceId) });
+            }
+            return next;
+          });
+          break;
+
+        case "topic:message":
+          appendFeed({ message: evt.message, receivedAt: new Date(), isBroadcast: false, topicName: evt.name });
+          break;
       }
     },
     [appendFeed],
@@ -331,6 +408,11 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      if (frame.action === "subscriptions:sync") {
+        // Dashboard's own subscriptions — already seeded from REST; no additional state needed
+        return;
+      }
+
       // Route to pending request if this is an ack frame
       const requestId = frame.requestId as string | undefined;
       if (requestId) {
@@ -387,13 +469,32 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
     [pluginRequest],
   );
 
+  const sendPublishTopic = useCallback(
+    (topic: string, type: MessageType, content: string, persistent: boolean, metadata?: Record<string, unknown>): Promise<void> => {
+      const hubHttpUrl = (process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100")
+        .replace(/^wss?:\/\//, (m) => (m === "wss://" ? "https://" : "http://"));
+      const apiKey = process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "";
+      return fetch(
+        `${hubHttpUrl}/api/topics/${encodeURIComponent(topic)}/publish?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, type, persistent, metadata, from: dashboardInstanceId }),
+        },
+      ).then((r) => { if (!r.ok) throw new Error(`publish failed: ${r.status}`); });
+    },
+    [dashboardInstanceId],
+  );
+
   // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
     mountedRef.current = true;
-    // seedInstances is async — setState fires after promise resolves, guarded by mountedRef
+    // seedInstances and seedTopics are async — setState fires after promise resolves, guarded by mountedRef
     // eslint-disable-next-line react-hooks/set-state-in-effect
     seedInstances();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    seedTopics();
     connect();
     connectPlugin();
 
@@ -405,7 +506,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
       wsRef.current?.close();
       pluginWsRef.current?.close();
     };
-  }, [connect, connectPlugin, seedInstances]);
+  }, [connect, connectPlugin, seedInstances, seedTopics]);
 
   return (
     <WsContext.Provider
@@ -415,8 +516,10 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
         feed,
         sessionStats,
         dashboardInstanceId,
+        topics,
         sendMessage,
         sendBroadcast,
+        sendPublishTopic,
       }}
     >
       {children}
