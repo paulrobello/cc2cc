@@ -9,9 +9,11 @@ import {
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { config } from "./config.js";
 import { registry } from "./registry.js";
+import { redis } from "./redis.js";
 import { INSTANCE_ID_RE } from "./validation.js";
 import { pushMessage, atomicFlushOne, ackProcessed, getQueueDepth, migrateQueue } from "./queue.js";
 import { BroadcastManager } from "./broadcast.js";
+import { topicManager, parseProject } from "./topic-manager.js";
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
@@ -90,6 +92,12 @@ export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
 
   // Atomic queue flush: replay all pending messages before entering live mode
   await flushPendingQueue(instanceId, ws);
+
+  // Auto-join project topic (reuses `project` extracted above)
+  await topicManager.createTopic(project, instanceId);
+  await topicManager.subscribe(project, instanceId);
+  const topics = await topicManager.getTopicsForInstance(instanceId);
+  ws.send(JSON.stringify({ action: "subscriptions:sync", topics }));
 
   // Broadcast instance:joined to all dashboard clients
   emitToDashboards({
@@ -179,6 +187,14 @@ export async function onPluginMessage(
     await handleGetMessages(ws, instanceId, msg);
   } else if (action === "session_update") {
     await handleSessionUpdate(ws, instanceId, msg);
+  } else if (action === "set_role") {
+    await handleSetRole(ws, instanceId, msg);
+  } else if (action === "subscribe_topic") {
+    await handleSubscribeTopic(ws, instanceId, msg);
+  } else if (action === "unsubscribe_topic") {
+    await handleUnsubscribeTopic(ws, instanceId, msg);
+  } else if (action === "publish_topic") {
+    await handlePublishTopic(ws, instanceId, msg);
   } else {
     ws.send(JSON.stringify({ error: `Unknown action: ${action}` }));
   }
@@ -408,12 +424,145 @@ async function handleSessionUpdate(
     timestamp: new Date().toISOString(),
   });
 
+  // Migrate topic subscriptions to new instanceId
+  const topicNames = await topicManager.getTopicsForInstance(oldInstanceId);
+  for (const name of topicNames) {
+    await redis.srem(`topic:${name}:subscribers`, oldInstanceId);
+    await redis.sadd(`topic:${name}:subscribers`, newInstanceId);
+  }
+  // SUNIONSTORE: union so any pre-existing newId subscriptions are preserved
+  await redis.sunionstore(
+    `instance:${newInstanceId}:topics`,
+    `instance:${newInstanceId}:topics`,
+    `instance:${oldInstanceId}:topics`,
+  );
+  await redis.del(`instance:${oldInstanceId}:topics`);
+  // Re-run auto-join for project topic (idempotent)
+  const newProject = parseProject(newInstanceId);
+  await topicManager.createTopic(newProject, newInstanceId);
+  await topicManager.subscribe(newProject, newInstanceId);
+  const newTopics = await topicManager.getTopicsForInstance(newInstanceId);
+  ws.send(JSON.stringify({ action: "subscriptions:sync", topics: newTopics }));
+
   // Ack back to the plugin over the current (old) WS
   ws.send(JSON.stringify({ requestId, migrated }));
 
   console.log(
     `[ws] session_update: ${oldInstanceId} → ${newInstanceId} (${migrated} messages migrated)`,
   );
+}
+
+// ── Role / topic frame handlers ───────────────────────────────────────────────
+
+async function handleSetRole(
+  ws: ServerWebSocket<WsData>,
+  instanceId: string,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  const { role, requestId } = msg as { role: string; requestId: string };
+  await registry.setRole(instanceId, role);
+  ws.send(JSON.stringify({ requestId, instanceId, role }));
+  emitToDashboards({
+    event: "instance:role_updated",
+    instanceId,
+    role,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+async function handleSubscribeTopic(
+  ws: ServerWebSocket<WsData>,
+  instanceId: string,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  const { topic, requestId } = msg as { topic: string; requestId: string };
+  await topicManager.subscribe(topic, instanceId);
+  ws.send(JSON.stringify({ requestId, topic, subscribed: true }));
+  emitToDashboards({
+    event: "topic:subscribed",
+    name: topic,
+    instanceId,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+async function handleUnsubscribeTopic(
+  ws: ServerWebSocket<WsData>,
+  instanceId: string,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  const { topic, requestId } = msg as { topic: string; requestId: string };
+  try {
+    await topicManager.unsubscribe(topic, instanceId);
+    ws.send(JSON.stringify({ requestId, topic, unsubscribed: true }));
+    emitToDashboards({
+      event: "topic:unsubscribed",
+      name: topic,
+      instanceId,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    ws.send(JSON.stringify({ requestId, error: (err as Error).message }));
+    // Do NOT emit HubEvent on rejection
+  }
+}
+
+async function handlePublishTopic(
+  ws: ServerWebSocket<WsData>,
+  instanceId: string,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  const {
+    topic,
+    type,
+    content,
+    persistent = false,
+    metadata,
+    requestId,
+  } = msg as {
+    topic: string;
+    type: string;
+    content: string;
+    persistent?: boolean;
+    metadata?: Record<string, unknown>;
+    requestId: string;
+  };
+
+  const wsRefs = new Map<string, { readyState: number; send(d: string): void }>();
+  for (const entry of registry.getOnline()) {
+    const ref = registry.getWsRef(entry.instanceId);
+    if (ref) wsRefs.set(entry.instanceId, ref as { readyState: number; send(d: string): void });
+  }
+
+  const message: Message = {
+    messageId: randomUUID(),
+    from: instanceId,
+    to: `topic:${topic}`,
+    type: type as MessageType,
+    content,
+    topicName: topic,
+    metadata,
+    timestamp: new Date().toISOString(),
+  };
+
+  const { delivered, queued } = await topicManager.publishToTopic(
+    topic,
+    message,
+    persistent,
+    instanceId,
+    wsRefs,
+  );
+
+  ws.send(JSON.stringify({ requestId, delivered, queued }));
+  emitToDashboards({
+    event: "topic:message",
+    name: topic,
+    message,
+    persistent,
+    delivered,
+    queued,
+    timestamp: new Date().toISOString(),
+  });
 }
 
 // ── Dashboard connect / disconnect ───────────────────────────────────────────
