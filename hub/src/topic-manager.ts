@@ -106,12 +106,16 @@ export const topicManager = {
       if (isOnline) {
         ws.send(JSON.stringify(message));
         delivered++;
-      }
-
-      if (persistent) {
+        if (persistent) {
+          await pushMessage(id, message);
+          queued++;
+        }
+      } else if (persistent) {
+        // Offline subscriber — queue for later delivery
         await pushMessage(id, message);
         queued++;
       }
+      // Offline + !persistent: skip (no delivery)
     }
 
     // Non-persistent path: increment daily stat directly

@@ -155,18 +155,21 @@ export function buildApiRoutes(app: Hono): void {
     return c.json(await topicManager.getSubscribers(name));
   });
 
-  // POST /api/topics — create a topic
+  // POST /api/topics — create a topic (idempotent; only emits topic:created for new topics)
   app.post("/api/topics", async (c) => {
     const authErr = validateKey(c.req.query("key"));
     if (authErr) return authErr;
     const { name } = await c.req.json<{ name: string }>();
+    const isNew = !(await topicManager.topicExists(name));
     const info = await topicManager.createTopic(name, "dashboard");
-    emitToDashboards({
-      event: "topic:created",
-      name,
-      createdBy: "dashboard",
-      timestamp: new Date().toISOString(),
-    });
+    if (isNew) {
+      emitToDashboards({
+        event: "topic:created",
+        name,
+        createdBy: "dashboard",
+        timestamp: new Date().toISOString(),
+      });
+    }
     return c.json(info);
   });
 
