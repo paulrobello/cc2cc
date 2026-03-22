@@ -1,5 +1,5 @@
 // plugin/src/tools.ts
-import type { InstanceInfo, Message, MessageType } from "@cc2cc/shared";
+import type { InstanceInfo, Message, MessageType, TopicInfo } from "@cc2cc/shared";
 import type { PluginConfig } from "./config.js";
 import type { HubConnection } from "./connection.js";
 
@@ -158,6 +158,89 @@ export function createTools(config: Pick<PluginConfig, "hubUrl" | "apiKey">, con
         throw new Error(`ping failed: ${res.status} ${res.statusText}`);
       }
       return res.json() as Promise<PingResult>;
+    },
+
+    /**
+     * set_role — declare this instance's role on the team.
+     * Uses conn.request("set_role", ...) so the hub stamps identity from WS connection.
+     */
+    async set_role(input: { role: string }): Promise<{ instanceId: string; role: string }> {
+      const response = await conn.request<{ requestId: string; instanceId: string; role: string }>(
+        "set_role",
+        { role: input.role },
+      );
+      const { requestId: _, ...result } = response;
+      return result;
+    },
+
+    /**
+     * subscribe_topic — subscribe to a named pub/sub topic.
+     * Uses conn.request("subscribe_topic", ...) for WS-based identity.
+     */
+    async subscribe_topic(input: { topic: string }): Promise<{ topic: string; subscribed: true }> {
+      const response = await conn.request<{ requestId: string; topic: string; subscribed: true }>(
+        "subscribe_topic",
+        { topic: input.topic },
+      );
+      const { requestId: _, ...result } = response;
+      return result;
+    },
+
+    /**
+     * unsubscribe_topic — unsubscribe from a topic (fails for auto-joined project topic).
+     * Uses conn.request("unsubscribe_topic", ...) for WS-based identity.
+     */
+    async unsubscribe_topic(input: {
+      topic: string;
+    }): Promise<{ topic: string; unsubscribed: true }> {
+      const response = await conn.request<
+        | { requestId: string; topic: string; unsubscribed: true }
+        | { requestId: string; error: string }
+      >("unsubscribe_topic", { topic: input.topic });
+      if ("error" in response) throw new Error(response.error);
+      const { requestId: _, ...result } = response as {
+        requestId: string;
+        topic: string;
+        unsubscribed: true;
+      };
+      return result;
+    },
+
+    /**
+     * list_topics — list all available topics with subscriber counts.
+     * GET /api/topics?key=<apiKey>
+     */
+    async list_topics(_input: Record<string, never>): Promise<TopicInfo[]> {
+      const res = await fetch(`${httpHubUrl}/api/topics?key=${encodeURIComponent(apiKey)}`);
+      if (!res.ok) throw new Error(`list_topics failed: ${res.status} ${res.statusText}`);
+      return res.json() as Promise<TopicInfo[]>;
+    },
+
+    /**
+     * publish_topic — publish a message to a topic.
+     * Uses conn.request("publish_topic", ...) so the hub stamps `from` from WS identity.
+     */
+    async publish_topic(input: {
+      topic: string;
+      type: MessageType;
+      content: string;
+      persistent?: boolean;
+      metadata?: Record<string, unknown>;
+    }): Promise<{ delivered: number; queued: number }> {
+      const payload: Record<string, unknown> = {
+        topic: input.topic,
+        type: input.type,
+        content: input.content,
+        persistent: input.persistent ?? false,
+      };
+      if (input.metadata !== undefined) payload.metadata = input.metadata;
+      const response = await conn.request<{
+        requestId: string;
+        delivered: number;
+        queued: number;
+      }>("publish_topic", payload);
+      const { requestId: _, ...result } = response;
+      return result;
     },
   };
 }

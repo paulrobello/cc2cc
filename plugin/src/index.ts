@@ -12,7 +12,13 @@ import { HubConnection } from "./connection.js";
 import { emitChannelNotification } from "./channel.js";
 import { createTools } from "./tools.js";
 import type { Message } from "@cc2cc/shared";
-import { MessageType } from "@cc2cc/shared";
+import {
+  MessageType,
+  SetRoleInputSchema,
+  SubscribeTopicInputSchema,
+  UnsubscribeTopicInputSchema,
+  PublishTopicInputSchema,
+} from "@cc2cc/shared";
 
 // ── Boot ────────────────────────────────────────────────────────────────────
 
@@ -206,6 +212,79 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
       },
     },
+    {
+      name: "set_role",
+      description:
+        "Declare your role on the team (e.g. 'cc2cc/backend-reviewer'). Call early in session. Re-call if focus shifts.",
+      inputSchema: {
+        type: "object",
+        required: ["role"],
+        properties: {
+          role: { type: "string", description: "Role label for this instance" },
+        },
+      },
+    },
+    {
+      name: "subscribe_topic",
+      description:
+        "Subscribe to a named pub/sub topic. You cannot unsubscribe from your auto-joined project topic.",
+      inputSchema: {
+        type: "object",
+        required: ["topic"],
+        properties: {
+          topic: { type: "string", description: "Topic name to subscribe to" },
+        },
+      },
+    },
+    {
+      name: "unsubscribe_topic",
+      description:
+        "Unsubscribe from a topic. Will fail if it's your auto-joined project topic.",
+      inputSchema: {
+        type: "object",
+        required: ["topic"],
+        properties: {
+          topic: { type: "string", description: "Topic name to unsubscribe from" },
+        },
+      },
+    },
+    {
+      name: "list_topics",
+      description: "List all available topics with subscriber counts.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    },
+    {
+      name: "publish_topic",
+      description:
+        "Publish a message to a topic. Set persistent=true for task assignments so offline subscribers receive it.",
+      inputSchema: {
+        type: "object",
+        required: ["topic", "type", "content"],
+        properties: {
+          topic: { type: "string", description: "Topic name to publish to" },
+          type: {
+            type: "string",
+            enum: Object.values(MessageType),
+            description: "Message type",
+          },
+          content: { type: "string", description: "Message content" },
+          persistent: {
+            type: "boolean",
+            description: "Queue for offline subscribers (default false)",
+            default: false,
+          },
+          metadata: {
+            type: "object",
+            description: "Optional metadata key-value pairs",
+            nullable: true,
+          },
+        },
+      },
+    },
   ],
 }));
 
@@ -271,6 +350,45 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "ping": {
         const input = z.object({ to: z.string() }).parse(args);
         const result = await tools.ping(input);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      case "set_role": {
+        const input = SetRoleInputSchema.parse(args);
+        const result = await tools.set_role(input);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      case "subscribe_topic": {
+        const input = SubscribeTopicInputSchema.parse(args);
+        const result = await tools.subscribe_topic(input);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      case "unsubscribe_topic": {
+        const input = UnsubscribeTopicInputSchema.parse(args);
+        const result = await tools.unsubscribe_topic(input);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      case "list_topics": {
+        const topics = await tools.list_topics({});
+        return {
+          content: [{ type: "text", text: JSON.stringify(topics, null, 2) }],
+        };
+      }
+
+      case "publish_topic": {
+        const input = PublishTopicInputSchema.parse(args);
+        const result = await tools.publish_topic(input);
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
