@@ -493,7 +493,6 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
     // seedInstances and seedTopics are async — setState fires after promise resolves, guarded by mountedRef
     // eslint-disable-next-line react-hooks/set-state-in-effect
     seedInstances();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     seedTopics();
     connect();
     connectPlugin();

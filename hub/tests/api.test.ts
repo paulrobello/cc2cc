@@ -48,7 +48,15 @@ const configMock = {
 // Mock topicManager
 const topicManagerMock = {
   listTopics: mock(async () => [] as TopicInfo[]),
-  createTopic: mock(async () => ({ name: "cc2cc", createdAt: "2026-01-01T00:00:00.000Z", createdBy: "test", subscriberCount: 0 } as TopicInfo)),
+  createTopic: mock(
+    async () =>
+      ({
+        name: "cc2cc",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        createdBy: "test",
+        subscriberCount: 0,
+      }) as TopicInfo,
+  ),
   deleteTopic: mock(async () => {}),
   subscribe: mock(async () => {}),
   unsubscribe: mock(async () => {}),
@@ -87,7 +95,9 @@ function makeApp() {
 const app = makeApp();
 
 beforeEach(() => {
-  Object.values(topicManagerMock).forEach((m) => (m as ReturnType<typeof mock>).mockClear?.());
+  for (const m of Object.values(topicManagerMock)) {
+    (m as ReturnType<typeof mock>).mockClear?.();
+  }
 });
 
 describe("GET /health", () => {
@@ -161,11 +171,16 @@ describe("DELETE /api/queue/:id", () => {
 describe("GET /api/topics", () => {
   it("returns 200 with topic list", async () => {
     topicManagerMock.listTopics.mockResolvedValue([
-      { name: "cc2cc", createdAt: "2026-01-01T00:00:00.000Z", createdBy: "alice@srv:cc2cc/abc", subscriberCount: 1 },
+      {
+        name: "cc2cc",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        createdBy: "alice@srv:cc2cc/abc",
+        subscriberCount: 1,
+      },
     ]);
     const res = await app.request(`/api/topics?key=${KEY}`);
     expect(res.status).toBe(200);
-    const body = await res.json() as unknown[];
+    const body = (await res.json()) as unknown[];
     expect(body).toHaveLength(1);
   });
 });
@@ -216,7 +231,7 @@ describe("DELETE /api/topics/:name", () => {
     topicManagerMock.getSubscribers.mockResolvedValue([]);
     const res = await app.request(`/api/topics/cc2cc?key=${KEY}`, { method: "DELETE" });
     expect(res.status).toBe(200);
-    const body = await res.json() as { deleted: boolean; name: string };
+    const body = (await res.json()) as { deleted: boolean; name: string };
     expect(body.deleted).toBe(true);
     expect(body.name).toBe("cc2cc");
   });

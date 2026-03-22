@@ -161,7 +161,12 @@ export function buildApiRoutes(app: Hono): void {
     if (authErr) return authErr;
     const { name } = await c.req.json<{ name: string }>();
     const info = await topicManager.createTopic(name, "dashboard");
-    emitToDashboards({ event: "topic:created", name, createdBy: "dashboard", timestamp: new Date().toISOString() });
+    emitToDashboards({
+      event: "topic:created",
+      name,
+      createdBy: "dashboard",
+      timestamp: new Date().toISOString(),
+    });
     return c.json(info);
   });
 
@@ -195,7 +200,12 @@ export function buildApiRoutes(app: Hono): void {
       return c.json({ error: "instance not found" }, 404);
     }
     await topicManager.subscribe(name, instanceId);
-    emitToDashboards({ event: "topic:subscribed", name, instanceId, timestamp: new Date().toISOString() });
+    emitToDashboards({
+      event: "topic:subscribed",
+      name,
+      instanceId,
+      timestamp: new Date().toISOString(),
+    });
     return c.json({ subscribed: true, topic: name });
   });
 
@@ -210,7 +220,12 @@ export function buildApiRoutes(app: Hono): void {
     const { instanceId } = await c.req.json<{ instanceId: string }>();
     try {
       await topicManager.unsubscribe(name, instanceId);
-      emitToDashboards({ event: "topic:unsubscribed", name, instanceId, timestamp: new Date().toISOString() });
+      emitToDashboards({
+        event: "topic:unsubscribed",
+        name,
+        instanceId,
+        timestamp: new Date().toISOString(),
+      });
       return c.json({ unsubscribed: true, topic: name });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
@@ -225,8 +240,19 @@ export function buildApiRoutes(app: Hono): void {
     if (!(await topicManager.topicExists(name))) {
       return c.json({ error: "topic not found" }, 404);
     }
-    const { content, type, persistent = false, from, metadata } =
-      await c.req.json<{ content: string; type: string; persistent?: boolean; from?: string; metadata?: Record<string, unknown> }>();
+    const {
+      content,
+      type,
+      persistent = false,
+      from,
+      metadata,
+    } = await c.req.json<{
+      content: string;
+      type: string;
+      persistent?: boolean;
+      from?: string;
+      metadata?: Record<string, unknown>;
+    }>();
 
     const wsRefs = new Map<string, { readyState: number; send(d: string): void }>();
     for (const entry of registry.getOnline()) {
@@ -246,10 +272,22 @@ export function buildApiRoutes(app: Hono): void {
     };
 
     const { delivered, queued } = await topicManager.publishToTopic(
-      name, message, persistent, from ?? "", wsRefs,
+      name,
+      message,
+      persistent,
+      from ?? "",
+      wsRefs,
     );
 
-    emitToDashboards({ event: "topic:message", name, message, persistent, delivered, queued, timestamp: new Date().toISOString() });
+    emitToDashboards({
+      event: "topic:message",
+      name,
+      message,
+      persistent,
+      delivered,
+      queued,
+      timestamp: new Date().toISOString(),
+    });
     return c.json({ delivered, queued });
   });
 }

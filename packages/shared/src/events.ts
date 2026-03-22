@@ -122,6 +122,10 @@ export type InstanceRemovedEvent = z.infer<typeof InstanceRemovedEventSchema>;
 export type TopicCreatedEvent = z.infer<typeof TopicCreatedEventSchema>;
 export type TopicDeletedEvent = z.infer<typeof TopicDeletedEventSchema>;
 export type TopicSubscribedEvent = z.infer<typeof TopicSubscribedEventSchema>;
-export type TopicUnsubscribedEvent = z.infer<typeof TopicUnsubscribedEventSchema>;
+export type TopicUnsubscribedEvent = z.infer<
+	typeof TopicUnsubscribedEventSchema
+>;
 export type TopicMessageEvent = z.infer<typeof TopicMessageEventSchema>;
-export type InstanceRoleUpdatedEvent = z.infer<typeof InstanceRoleUpdatedEventSchema>;
+export type InstanceRoleUpdatedEvent = z.infer<
+	typeof InstanceRoleUpdatedEventSchema
+>;

@@ -47,14 +47,116 @@ const redisMock = {
     calls.push({ cmd: "rename", args });
     return "OK";
   }),
-  get: mock(async () => "5"),
+  get: mock(async (..._args: unknown[]) => "5"),
+  del: mock(async (...args: unknown[]) => {
+    calls.push({ cmd: "del", args });
+    return 1;
+  }),
   lrange: mock(async () => [] as string[]),
+  pipeline: mock(() => ({
+    llen: mock(() => ({ exec: mock(async () => []) })),
+    exec: mock(async () => []),
+  })),
   on: mock(() => {}),
 };
 
 mock.module("../src/redis.js", () => ({
   redis: redisMock,
   checkRedisHealth: mock(async () => true),
+}));
+
+// Own the queue.js mock so topic-manager.test.ts's mock.module("../src/queue.js") doesn't leak in.
+// The factory re-implements queue.ts using the local redisMock — each Bun worker gets its own
+// instance when both files call mock.module for the same specifier.
+const MAX_QUEUE_DEPTH = 1000;
+const QUEUE_TTL_SECONDS = 86400;
+const queueKey = (id: string) => `queue:${id}`;
+const processingKey = (id: string) => `processing:${id}`;
+
+mock.module("../src/queue.js", () => ({
+  async pushMessage(recipientId: string, message: Message): Promise<number> {
+    const key = queueKey(recipientId);
+    const depth = await redisMock.rpush(key, JSON.stringify(message));
+    await redisMock.expire(key, QUEUE_TTL_SECONDS);
+    if (depth > MAX_QUEUE_DEPTH) await redisMock.lpop(key);
+    await redisMock.incr("stats:messages:today");
+    const now = new Date();
+    const midnight = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1),
+    );
+    await redisMock.expireat("stats:messages:today", Math.floor(midnight.getTime() / 1000));
+    return Math.min(depth, MAX_QUEUE_DEPTH);
+  },
+  async atomicFlushOne(instanceId: string): Promise<{ message: Message; raw: string } | null> {
+    const raw = await redisMock.rpoplpush(queueKey(instanceId), processingKey(instanceId));
+    if (!raw) return null;
+    try {
+      const message = JSON.parse(raw) as Message;
+      return { message, raw };
+    } catch {
+      await redisMock.lrem(processingKey(instanceId), 1, raw);
+      return null;
+    }
+  },
+  async ackProcessed(instanceId: string, raw: string): Promise<void> {
+    await redisMock.lrem(processingKey(instanceId), 1, raw);
+  },
+  async replayProcessing(instanceId: string): Promise<number> {
+    let replayed = 0;
+    while (true) {
+      const raw = await redisMock.rpoplpush(processingKey(instanceId), queueKey(instanceId));
+      if (!raw) break;
+      replayed++;
+    }
+    if (replayed > 0) await redisMock.expire(queueKey(instanceId), QUEUE_TTL_SECONDS);
+    return replayed;
+  },
+  async getQueueDepth(instanceId: string): Promise<number> {
+    return redisMock.llen(queueKey(instanceId));
+  },
+  async getTotalQueued(instanceIds: string[]): Promise<number> {
+    if (instanceIds.length === 0) return 0;
+    const results = await Promise.all(instanceIds.map((id) => redisMock.llen(queueKey(id))));
+    return results.reduce((s, n) => s + n, 0);
+  },
+  async getMessagesTodayCount(): Promise<number> {
+    const raw = await redisMock.get("stats:messages:today");
+    return raw ? parseInt(raw, 10) : 0;
+  },
+  async flushQueue(instanceId: string): Promise<void> {
+    await redisMock.del?.(queueKey(instanceId));
+  },
+  async migrateQueue(oldId: string, newId: string): Promise<number> {
+    let migrated = 0;
+    const procKey = processingKey(oldId);
+    while (true) {
+      const raw = await redisMock.rpoplpush(procKey, queueKey(newId));
+      if (!raw) break;
+      migrated++;
+    }
+    const oldQueueKey = queueKey(oldId);
+    const newQueueKey = queueKey(newId);
+    const oldQueueLen = await redisMock.llen(oldQueueKey);
+    if (oldQueueLen > 0) {
+      const newQueueLen = await redisMock.llen(newQueueKey);
+      if (newQueueLen === 0) {
+        try {
+          await redisMock.rename(oldQueueKey, newQueueKey);
+          migrated += oldQueueLen;
+        } catch {
+          /* no-op */
+        }
+      } else {
+        while (true) {
+          const raw = await redisMock.rpoplpush(oldQueueKey, newQueueKey);
+          if (!raw) break;
+          migrated++;
+        }
+      }
+    }
+    if (migrated > 0) await redisMock.expire(newQueueKey, QUEUE_TTL_SECONDS);
+    return migrated;
+  },
 }));
 
 const { pushMessage, atomicFlushOne, ackProcessed, replayProcessing, getQueueDepth, migrateQueue } =

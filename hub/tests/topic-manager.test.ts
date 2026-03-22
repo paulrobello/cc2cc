@@ -23,16 +23,22 @@ mock.module("../src/redis.js", () => ({
 
 mock.module("../src/queue.js", () => ({
   pushMessage: pushMessageMock,
+  atomicFlushOne: mock(async () => null),
+  ackProcessed: mock(async () => {}),
+  replayProcessing: mock(async () => 0),
+  getQueueDepth: mock(async () => 0),
   getTotalQueued: mock(async () => 0),
   getMessagesTodayCount: mock(async () => 0),
   flushQueue: mock(async () => {}),
-  replayProcessing: mock(async () => 0),
+  migrateQueue: mock(async () => 0),
 }));
 
 const { topicManager } = await import("../src/topic-manager.js");
 
 function clearMocks() {
-  Object.values(redisMock).forEach((m) => (m as ReturnType<typeof mock>).mockClear?.());
+  for (const m of Object.values(redisMock)) {
+    (m as ReturnType<typeof mock>).mockClear?.();
+  }
   pushMessageMock.mockClear();
 }
 
@@ -80,15 +86,21 @@ describe("topicManager.subscribe / unsubscribe", () => {
 
   it("unsubscribe removes from both sets for non-project topic", async () => {
     await topicManager.unsubscribe("other-topic", "alice@srv:cc2cc/abc");
-    expect(redisMock.srem).toHaveBeenCalledWith("topic:other-topic:subscribers", "alice@srv:cc2cc/abc");
-    expect(redisMock.srem).toHaveBeenCalledWith("instance:alice@srv:cc2cc/abc:topics", "other-topic");
+    expect(redisMock.srem).toHaveBeenCalledWith(
+      "topic:other-topic:subscribers",
+      "alice@srv:cc2cc/abc",
+    );
+    expect(redisMock.srem).toHaveBeenCalledWith(
+      "instance:alice@srv:cc2cc/abc:topics",
+      "other-topic",
+    );
   });
 
   it("unsubscribe throws when topic equals the auto-joined project topic", async () => {
     // instanceId project segment is "cc2cc" — matches topic name
-    await expect(
-      topicManager.unsubscribe("cc2cc", "alice@srv:cc2cc/abc"),
-    ).rejects.toThrow("cannot unsubscribe from auto-joined project topic");
+    await expect(topicManager.unsubscribe("cc2cc", "alice@srv:cc2cc/abc")).rejects.toThrow(
+      "cannot unsubscribe from auto-joined project topic",
+    );
   });
 });
 
@@ -125,7 +137,11 @@ describe("topicManager.publishToTopic", () => {
   it("returns delivered=0 queued=0 for empty subscriber list", async () => {
     redisMock.smembers.mockResolvedValue([]);
     const result = await topicManager.publishToTopic(
-      "cc2cc", makeMsg() as never, false, "alice@srv:cc2cc/abc", new Map(),
+      "cc2cc",
+      makeMsg() as never,
+      false,
+      "alice@srv:cc2cc/abc",
+      new Map(),
     );
     expect(result.delivered).toBe(0);
     expect(result.queued).toBe(0);
@@ -135,7 +151,11 @@ describe("topicManager.publishToTopic", () => {
     redisMock.smembers.mockResolvedValue(["bob@srv:cc2cc/xyz"]);
     // bob has no WS ref → offline
     await topicManager.publishToTopic(
-      "cc2cc", makeMsg() as never, true, "alice@srv:cc2cc/abc", new Map(),
+      "cc2cc",
+      makeMsg() as never,
+      true,
+      "alice@srv:cc2cc/abc",
+      new Map(),
     );
     expect(pushMessageMock).toHaveBeenCalledWith("bob@srv:cc2cc/xyz", expect.any(Object));
   });
@@ -143,7 +163,11 @@ describe("topicManager.publishToTopic", () => {
   it("persistent=false increments stats counter once", async () => {
     redisMock.smembers.mockResolvedValue([]);
     await topicManager.publishToTopic(
-      "cc2cc", makeMsg() as never, false, "alice@srv:cc2cc/abc", new Map(),
+      "cc2cc",
+      makeMsg() as never,
+      false,
+      "alice@srv:cc2cc/abc",
+      new Map(),
     );
     expect(redisMock.incr).toHaveBeenCalledWith("stats:messages:today");
   });
@@ -153,7 +177,11 @@ describe("topicManager.publishToTopic", () => {
     redisMock.smembers.mockResolvedValue(["alice@srv:cc2cc/abc"]);
     const wsRefs = new Map([["alice@srv:cc2cc/abc", senderWs]]);
     await topicManager.publishToTopic(
-      "cc2cc", makeMsg() as never, false, "alice@srv:cc2cc/abc", wsRefs,
+      "cc2cc",
+      makeMsg() as never,
+      false,
+      "alice@srv:cc2cc/abc",
+      wsRefs,
     );
     expect(senderWs.send).not.toHaveBeenCalled();
   });

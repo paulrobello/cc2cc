@@ -19,7 +19,7 @@ interface WsRef {
 export const topicManager = {
   async createTopic(name: string, createdBy: string): Promise<TopicInfo> {
     const existing = await redis.hgetall(`topic:${name}`);
-    if (existing && existing.name) {
+    if (existing?.name) {
       const subscribers = await redis.smembers(`topic:${name}:subscribers`);
       return {
         name: existing.name,
@@ -35,9 +35,7 @@ export const topicManager = {
 
   async deleteTopic(name: string): Promise<void> {
     const members = await redis.smembers(`topic:${name}:subscribers`);
-    await Promise.all(
-      members.map((id) => redis.srem(`instance:${id}:topics`, name)),
-    );
+    await Promise.all(members.map((id) => redis.srem(`instance:${id}:topics`, name)));
     await redis.del(`topic:${name}:subscribers`);
     await redis.del(`topic:${name}`);
   },
@@ -65,9 +63,7 @@ export const topicManager = {
 
   async listTopics(): Promise<TopicInfo[]> {
     const keys = await redis.keys("topic:*");
-    const topicKeys = keys.filter(
-      (k) => !k.includes(":subscribers") && !k.includes(":topics"),
-    );
+    const topicKeys = keys.filter((k) => !k.includes(":subscribers") && !k.includes(":topics"));
     const results = await Promise.all(
       topicKeys.map(async (key) => {
         const name = key.replace("topic:", "");

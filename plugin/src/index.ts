@@ -238,8 +238,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "unsubscribe_topic",
-      description:
-        "Unsubscribe from a topic. Will fail if it's your auto-joined project topic.",
+      description: "Unsubscribe from a topic. Will fail if it's your auto-joined project topic.",
       inputSchema: {
         type: "object",
         required: ["topic"],
