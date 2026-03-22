@@ -74,43 +74,50 @@ cc2cc/
 
 **Broadcast is fire-and-forget.** Messages sent to `to: 'broadcast'` are fanned out over live WS connections only — not queued in Redis. Offline instances will not receive them. Rate limit: 1 per instance per 5 seconds.
 
+**Topics are global and persistent.** Each instance auto-joins its project topic on connect (e.g. `cc2cc` for `username@host:cc2cc/uuid`). Topic subscriptions survive disconnects and are migrated to the new instanceId on `/clear`. `publish_topic` with `persistent: true` queues for offline subscribers; `persistent: false` is live-only. An instance cannot unsubscribe from its auto-joined project topic.
+
+**`Message.to` accepts a topic sentinel.** The `to` field can be `InstanceId | "broadcast" | \`topic:\${string}\``. Consumers branching on `msg.to` must guard with `msg.to.startsWith("topic:")` alongside the `"broadcast"` check.
+
+**`subscriptions:sync` is a hub push frame.** After connect (and after session migration), the hub sends `{ action: "subscriptions:sync", topics: string[] }` with no `requestId`. The plugin intercepts this before the request/reply correlator; the dashboard WS handler returns early on it.
+
 ### packages/shared
 
 No build step — imported directly as TypeScript source by all other workspaces. Central source of truth for:
-- `MessageType` enum and `Message` / `InstanceInfo` interfaces (`types.ts`)
+- `MessageType` enum and `Message` / `InstanceInfo` / `TopicInfo` interfaces (`types.ts`)
 - Zod schemas for all message shapes and tool inputs (`schema.ts`) — uses `z.nativeEnum(MessageType)` for enum alignment
-- `HubEvent` discriminated union for dashboard WebSocket events (`events.ts`)
+- `HubEvent` discriminated union for dashboard WebSocket events (`events.ts`) — includes 6 topic/role events: `topic:created`, `topic:deleted`, `topic:subscribed`, `topic:unsubscribed`, `topic:message`, `instance:role_updated`
 
 **Zod version is pinned to `^3`.** Do not upgrade to v4 — it is incompatible with the shared schemas.
 
 ### hub/
 
 - `config.ts` — env: `CC2CC_HUB_PORT` (3100), `CC2CC_HUB_API_KEY` (required), `CC2CC_REDIS_URL`
-- `registry.ts` — in-memory `Map` of live connections + Redis presence TTLs (24h)
+- `registry.ts` — in-memory `Map` of live connections + Redis presence TTLs (24h); `role?: string` stored per entry; `setRole()` re-writes Redis with EX 86400
 - `queue.ts` — RPOPLPUSH-based at-least-once delivery; max 1000 msgs/queue; daily stats counter (`stats:messages:today`) with EXPIREAT midnight UTC
 - `broadcast.ts` — `BroadcastManager`: in-memory fan-out + per-instance 5s rate limiter
-- `ws-handler.ts` — plugin/dashboard WS lifecycle; message routing; emits `HubEvent` to `dashboardClients` set
+- `topic-manager.ts` — all topic Redis operations; exports `topicManager` singleton and `parseProject(instanceId)` helper; Redis keys: `topic:{name}` (hash), `topic:{name}:subscribers` (Set), `instance:{id}:topics` (Set reverse index)
+- `ws-handler.ts` — plugin/dashboard WS lifecycle; message routing; emits `HubEvent` to `dashboardClients` set; handles WS frame actions: `send`, `broadcast`, `get_messages`, `ping`, `session_update`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `publish_topic`
 - `api.ts` — REST handlers; `GET /health` is the only unauthenticated endpoint; all others require `?key=`
 
 ### plugin/
 
 - `config.ts` — assembles `instanceId` from env vars; generates fresh UUIDv4 each start
-- `connection.ts` — `HubConnection`: WS client using `ws` package; exponential backoff (1s/×2/30s max); `request()` method with 10s timeout
-- `channel.ts` — converts hub `message:sent` events to `notifications/claude/channel` MCP notifications with `source: "cc2cc"` in meta
-- `tools.ts` — 5 MCP tools (`list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`) all calling hub REST via `fetch()` with `ws://` → `http://` substitution
+- `connection.ts` — `HubConnection`: WS client using `ws` package; exponential backoff (1s/×2/30s max); `request()` method with 10s timeout; intercepts `subscriptions:sync` push frames before the request/reply correlator
+- `channel.ts` — converts hub `message:sent` events to `notifications/claude/channel` MCP notifications; adds `topic` attribute when `message.topicName` is set
+- `tools.ts` — 10 MCP tools: `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic`
 
 ### dashboard/
 
 - `WsProvider` (`components/ws-provider/`) — TWO WebSocket connections:
-  - `/ws/dashboard` — receive-only hub event stream; exponential backoff; accumulates `instances` Map, `feed[]` (capped at 500), active task counter, error counter; dispatches all `HubEvent` types
-  - `/ws/plugin` — registered as `dashboard@<hostname>:dashboard/<uuid>`; used for `sendMessage`/`sendBroadcast` via WS `request()` pattern; receives replies addressed to the dashboard's instanceId
+  - `/ws/dashboard` — receive-only hub event stream; accumulates `instances` Map, `topics` Map, `feed[]` (capped at 500); dispatches all `HubEvent` types including 6 new topic/role events
+  - `/ws/plugin` — registered as `dashboard@<hostname>:dashboard/<uuid>`; used for `sendMessage`/`sendBroadcast`; `sendPublishTopic` goes via REST (`POST /api/topics/:name/publish`)
 - Dashboard instanceId generated once per browser session from `sessionStorage`; stable across re-renders, fresh per tab
-- View A (`app/page.tsx`) — Command Center: instance sidebar + live message feed + manual send bar
-- View B (`app/analytics/page.tsx`) — Stats bar + activity timeline
-- View C (`app/conversations/page.tsx`) — Thread-grouped conversation view + message inspector
-- `lib/api.ts` — typed fetch wrappers for hub REST; `sendMessage`/`sendBroadcast` go through WS (not REST — those endpoints don't exist); `removeInstance` calls `DELETE /api/instances/:id`
-- Message content renders as full markdown via `react-markdown` + `remark-gfm`
-- Instance sidebar: offline instances show a `×` button on hover to remove stale entries from the hub registry
+- `app/page.tsx` — Command Center: 3-group sidebar (Topics/Online/Offline), feed filter bar, instance subscriptions panel, manual send bar
+- `app/topics/page.tsx` — 3-panel Topics page: topic list + create/delete, subscriber list + subscribe/unsubscribe, publish panel
+- `app/analytics/page.tsx` — Stats bar + activity timeline
+- `app/conversations/page.tsx` — Thread-grouped view; topic messages are excluded from thread grouping
+- `lib/api.ts` — typed fetch wrappers; `hubUrl(path)` helper constructs all URLs; topic wrappers: `fetchTopics`, `createTopic`, `deleteTopic`, `subscribeToTopic`, `unsubscribeFromTopic`
+- Instance sidebar: sorted Topics → Online → Offline alphabetically within each group; role badge shown on online instances
 
 ### skill/
 
