@@ -85,7 +85,7 @@ export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
     return;
   }
 
-  const project = instanceId.split(":")[1]?.split("/")[0] ?? "";
+  const project = parseProject(instanceId);
   await registry.register(instanceId, project);
   registry.setWsRef(instanceId, ws);
   broadcastManager.addPluginWs(instanceId, ws);
@@ -407,7 +407,7 @@ async function handleSessionUpdate(
   });
 
   // Extract project from newInstanceId (same logic as onPluginOpen)
-  const project = newInstanceId.split(":")[1]?.split("/")[0] ?? "";
+  const project = parseProject(newInstanceId);
 
   // Register the new instance ID
   await registry.register(newInstanceId, project);
@@ -460,14 +460,18 @@ async function handleSetRole(
   msg: Record<string, unknown>,
 ): Promise<void> {
   const { role, requestId } = msg as { role: string; requestId: string };
-  await registry.setRole(instanceId, role);
-  ws.send(JSON.stringify({ requestId, instanceId, role }));
-  emitToDashboards({
-    event: "instance:role_updated",
-    instanceId,
-    role,
-    timestamp: new Date().toISOString(),
-  });
+  try {
+    const updated = await registry.setRole(instanceId, role);
+    ws.send(JSON.stringify({ requestId, instanceId, role: updated.role }));
+    emitToDashboards({
+      event: "instance:role_updated",
+      instanceId,
+      role: updated.role ?? "",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    ws.send(JSON.stringify({ requestId, error: (err as Error).message }));
+  }
 }
 
 async function handleSubscribeTopic(
