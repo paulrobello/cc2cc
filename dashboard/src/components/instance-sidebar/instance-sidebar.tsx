@@ -42,7 +42,7 @@ export function InstanceSidebar({
 
   return (
     <aside
-      className="flex h-full w-[340px] flex-col"
+      className="flex min-h-0 flex-1 w-full flex-col"
       style={{ background: "#070f1e", borderRight: "1px solid #1a3356" }}
     >
       {/* Header */}
