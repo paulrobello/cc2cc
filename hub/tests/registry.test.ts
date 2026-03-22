@@ -75,6 +75,11 @@ describe("registry", () => {
   it("returns undefined for unknown instance", () => {
     expect(registry.get("unknown@x:y/z")).toBeUndefined();
   });
+
+  it("register stores role when provided", async () => {
+    await registry.register("alice@srv:cc2cc/abc", "cc2cc", "architect");
+    expect(registry.get("alice@srv:cc2cc/abc")?.role).toBe("architect");
+  });
 });
 
 describe("registry.resolvePartial", () => {
@@ -146,6 +151,36 @@ describe("registry.resolvePartial", () => {
       expect(result.instanceId).toBe("alice@srv:api/new");
       expect(result.warning).toBeUndefined();
     }
+  });
+});
+
+describe("registry.setRole", () => {
+  beforeEach(() => {
+    registry.clear();
+    redisMock.set.mockClear();
+  });
+
+  it("updates role in-memory and returns updated entry", async () => {
+    await registry.register("alice@srv:cc2cc/abc", "cc2cc");
+    const updated = await registry.setRole("alice@srv:cc2cc/abc", "backend");
+    expect(updated.role).toBe("backend");
+    expect(registry.get("alice@srv:cc2cc/abc")?.role).toBe("backend");
+  });
+
+  it("re-writes Redis with EX 86400 and role in the JSON blob", async () => {
+    await registry.register("alice@srv:cc2cc/abc", "cc2cc");
+    redisMock.set.mockClear();
+    await registry.setRole("alice@srv:cc2cc/abc", "backend");
+    expect(redisMock.set).toHaveBeenCalledWith(
+      "instance:alice@srv:cc2cc/abc",
+      expect.stringContaining('"role":"backend"'),
+      "EX",
+      86400,
+    );
+  });
+
+  it("throws for an unknown instanceId", async () => {
+    await expect(registry.setRole("unknown@x:y/z", "anything")).rejects.toThrow();
   });
 });
 

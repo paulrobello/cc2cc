@@ -5,6 +5,7 @@ import { redis } from "./redis.js";
 interface RegistryEntry extends InstanceInfo {
   // ws is intentionally kept out of InstanceInfo (shared type must not import Bun types)
   wsRef?: unknown; // set by ws-handler when plugin connects; used for live delivery check
+  role?: string;
 }
 
 /**
@@ -24,7 +25,7 @@ export const registry = {
    * Register a new instance or re-register an existing one (reconnect).
    * Sets Redis presence key with 24h TTL.
    */
-  async register(instanceId: string, project: string): Promise<RegistryEntry> {
+  async register(instanceId: string, project: string, role?: string): Promise<RegistryEntry> {
     const now = new Date().toISOString();
     const entry: RegistryEntry = {
       instanceId,
@@ -32,11 +33,12 @@ export const registry = {
       status: "online" as InstanceStatus,
       connectedAt: now,
       queueDepth: 0,
+      role,
     };
     _map.set(instanceId, entry);
     await redis.set(
       `instance:${instanceId}`,
-      JSON.stringify({ instanceId, project: entry.project, connectedAt: now }),
+      JSON.stringify({ instanceId, project: entry.project, connectedAt: now, role }),
       "EX",
       86400,
     );
@@ -83,6 +85,20 @@ export const registry = {
   setQueueDepth(instanceId: string, depth: number): void {
     const entry = _map.get(instanceId);
     if (entry) entry.queueDepth = depth;
+  },
+
+  /** Set or update the role for an instance. Persists to Redis with 24h TTL. */
+  async setRole(instanceId: string, role: string): Promise<RegistryEntry> {
+    const entry = _map.get(instanceId);
+    if (!entry) throw new Error(`instance not found: ${instanceId}`);
+    entry.role = role;
+    await redis.set(
+      `instance:${instanceId}`,
+      JSON.stringify({ instanceId, project: entry.project, connectedAt: entry.connectedAt, role }),
+      "EX",
+      86400,
+    );
+    return entry;
   },
 
   /**
