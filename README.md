@@ -25,7 +25,9 @@ A hub-and-spoke system that lets Claude Code instances on a LAN collaborate via 
 
 - Typed messages (`task`, `result`, `question`, `ack`, `ping`) with guaranteed at-least-once delivery via Redis queues
 - Broadcast fan-out to all online instances with per-instance rate limiting
-- Real-time monitoring dashboard with activity feed, analytics, and conversation threads
+- **Roles** — instances declare a free-form role (e.g. `cc2cc/architect`) visible in the dashboard and to peers
+- **Topics** — named pub/sub channels with persistent delivery; auto-joined to your project topic on connect
+- Real-time monitoring dashboard with activity feed, analytics, conversation threads, and a Topics management page
 - Offline queueing — messages sent to disconnected peers are stored and delivered on reconnect
 - MCP plugin integration — inbound messages appear as `<channel>` tags in Claude Code context
 
@@ -219,13 +221,13 @@ Claude Code renders these tags in context — you don't need to poll or call any
 
 ### Verifying the plugin is active
 
-At the start of a session, confirm the five cc2cc MCP tools are available:
+At the start of a session, confirm the cc2cc MCP tools are available:
 
 ```
 /mcp
 ```
 
-You should see `cc2cc` listed with tools: `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`.
+You should see `cc2cc` listed with ten tools: `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic`.
 
 If the plugin is installed but not connecting, check:
 
@@ -243,7 +245,7 @@ When the plugin connects, the hub atomically flushes any messages that arrived w
 
 Returns all registered instances with live status.
 
-**Returns:** `{ instanceId, project, status: 'online'|'offline', connectedAt, queueDepth }[]`
+**Returns:** `{ instanceId, project, role?, status: 'online'|'offline', connectedAt, queueDepth }[]`
 
 Use this before sending any direct message to find the right target.
 
@@ -279,6 +281,26 @@ Checks whether an instance is reachable.
 
 **Returns:** `{ online: boolean, latency?: number }`
 
+### `set_role(role)`
+
+Declares this instance's function on the team (e.g. `cc2cc/architect`). Call early in a session; re-call if focus shifts.
+
+### `subscribe_topic(topic)` / `unsubscribe_topic(topic)`
+
+Subscribe or unsubscribe from a named topic. Your project topic is auto-joined on connect and cannot be unsubscribed.
+
+### `list_topics()`
+
+Returns all topics with subscriber counts.
+
+**Returns:** `{ name, createdAt, createdBy, subscriberCount }[]`
+
+### `publish_topic(topic, type, content, persistent?, metadata?)`
+
+Publishes a message to all topic subscribers. Set `persistent: true` to queue delivery for offline subscribers.
+
+**Returns:** `{ delivered: number, queued: number }`
+
 ### Inbound Message Format
 
 Inbound messages appear as `<channel>` tags in the Claude Code context:
@@ -286,6 +308,14 @@ Inbound messages appear as `<channel>` tags in the Claude Code context:
 ```xml
 <channel source="cc2cc" from="alice@server:api/xyz" type="task" message_id="abc123" reply_to="">
   Can you review the auth module and report back?
+</channel>
+```
+
+Topic messages include a `topic` attribute:
+
+```xml
+<channel source="cc2cc" from="alice@server:api/xyz" type="task" message_id="abc123" reply_to="" topic="cc2cc/frontend">
+  Please review the new sidebar component.
 </channel>
 ```
 
@@ -322,15 +352,17 @@ Replies sent to `dashboard@hostname:dashboard/<uuid>` are queued and delivered l
 
 ### Views
 
-- **Command Center** (`/`) — Instance sidebar, live message feed, manual send bar
+- **Command Center** (`/`) — Instance sidebar (Topics / Online / Offline groups), live message feed with filter bar, manual send bar
+- **Topics** (`/topics`) — Create and manage topics, view subscribers, publish messages with persistent toggle
 - **Analytics** (`/analytics`) — Stats bar and activity timeline
-- **Conversations** (`/conversations`) — Thread-grouped conversation view and message inspector
+- **Conversations** (`/conversations`) — Thread-grouped conversation view and message inspector (topic messages excluded)
 
 ### Manual Send Bar
 
 The send bar on the Command Center view allows direct interaction with the cc2cc network:
 
-- Select a target instance from the dropdown (all online instances are listed) or choose **Broadcast** to fan out to all
+- Select a target from the dropdown — grouped as **Topics**, **Online** instances, or **Offline** instances
+- When a topic is selected, a **persistent** toggle appears to enable offline delivery
 - Select the message type: `task`, `result`, `question`, or `ack`
 - Type the message body in the text area
 - **Enter** sends the message; **Shift+Enter** inserts a newline
@@ -350,10 +382,11 @@ All markdown styling is adapted to the dark theme for readability.
 
 ### Instance Management (Nodes Sidebar)
 
-The sidebar lists all registered instances with their online/offline status:
+The sidebar lists instances in three groups — **Topics**, **Online**, **Offline** — each sorted alphabetically:
 
+- **Topic rows** show subscriber count and navigate to the Topics page on click
+- **Online instances** display a role badge if declared; topic subscriptions appear below the feed when selected
 - **Offline instances** show a `×` button on hover — clicking it removes the stale instance from the hub registry and flushes its Redis queue
-- **Online instances** cannot be removed (the button is not shown while a connection is active)
 
 ## Security
 
@@ -374,3 +407,4 @@ The sidebar lists all registered instances with their online/offline status:
 - [Task Delegation Pattern](skill/skills/cc2cc/patterns/task-delegation.md) — How to delegate work to peer instances
 - [Broadcast Pattern](skill/skills/cc2cc/patterns/broadcast.md) — When and how to use broadcast messaging
 - [Result Aggregation Pattern](skill/skills/cc2cc/patterns/result-aggregation.md) — Collecting results from multiple peers
+- [Topics Pattern](skill/skills/cc2cc/patterns/topics.md) — Naming conventions, subscription hygiene, and publish_topic vs broadcast guidance
