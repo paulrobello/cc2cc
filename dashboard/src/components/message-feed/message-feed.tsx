@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MessageRow } from "./message-row";
 import { cn } from "@/lib/utils";
-import type { FeedMessage } from "@/types/dashboard";
+import type { FeedMessage, TopicState } from "@/types/dashboard";
 import { MessageType } from "@cc2cc/shared";
 
 type FilterType = "all" | MessageType | "broadcast";
@@ -20,19 +20,40 @@ const FILTER_CHIPS: { label: string; value: FilterType }[] = [
 
 interface MessageFeedProps {
   feed: FeedMessage[];
-  filterInstanceId: string | null;
+  filterInstanceId?: string | null;
+  topics?: Map<string, TopicState>;
+  feedFilter?: { kind: "all" | "direct" | "broadcast" | "topic"; topicName?: string };
+  onFilterChange?: (f: { kind: "all" | "direct" | "broadcast" | "topic"; topicName?: string }) => void;
 }
 
-export function MessageFeed({ feed, filterInstanceId }: MessageFeedProps) {
+export function MessageFeed({
+  feed,
+  filterInstanceId,
+  topics,
+  feedFilter,
+  onFilterChange,
+}: MessageFeedProps) {
   const [typeFilter, setTypeFilter] = useState<FilterType>("all");
   const bottomRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
   const filtered = feed.filter((entry) => {
+    // Instance filter
     if (filterInstanceId) {
       const { from, to } = entry.message;
       if (from !== filterInstanceId && to !== filterInstanceId) return false;
     }
+    // Feed filter (all/direct/broadcast/topic)
+    if (feedFilter && feedFilter.kind !== "all") {
+      if (feedFilter.kind === "direct") {
+        if (entry.isBroadcast || entry.topicName) return false;
+      } else if (feedFilter.kind === "broadcast") {
+        if (!entry.isBroadcast) return false;
+      } else if (feedFilter.kind === "topic") {
+        if (entry.topicName !== feedFilter.topicName) return false;
+      }
+    }
+    // Type filter
     if (typeFilter === "all") return true;
     if (typeFilter === "broadcast") return entry.isBroadcast;
     return entry.message.type === typeFilter && !entry.isBroadcast;
@@ -46,7 +67,39 @@ export function MessageFeed({ feed, filterInstanceId }: MessageFeedProps) {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {/* Filter strip */}
+      {/* Feed filter bar (all/direct/broadcast/topic) */}
+      <div className="flex gap-1 px-3 py-1.5 shrink-0" style={{ borderBottom: "1px solid #1a3356" }}>
+        {(["all", "direct", "broadcast"] as const).map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            onClick={() => onFilterChange?.({ kind })}
+            className={cn(
+              "px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider",
+              feedFilter?.kind === kind ? "text-[#00d4ff]" : "text-[#3a5470] hover:text-[#6b8aaa]",
+            )}
+          >
+            {kind}
+          </button>
+        ))}
+        <select
+          value={feedFilter?.kind === "topic" ? (feedFilter.topicName ?? "") : ""}
+          onChange={(e) =>
+            e.target.value && onFilterChange?.({ kind: "topic", topicName: e.target.value })
+          }
+          className="font-mono text-[10px] bg-transparent border-0 outline-none cursor-pointer"
+          style={{ color: feedFilter?.kind === "topic" ? "#00d4ff" : "#3a5470" }}
+        >
+          <option value="">topic ▾</option>
+          {Array.from(topics?.values() ?? []).map((t) => (
+            <option key={t.name} value={t.name}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Type filter strip */}
       <div
         className="flex items-center gap-px px-2 py-1.5"
         style={{ borderBottom: "1px solid #1a3356", background: "#070f1e" }}

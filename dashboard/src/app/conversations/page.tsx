@@ -10,6 +10,12 @@ import { cn, shortInstanceId } from "@/lib/utils";
 
 export default function ConversationsPage() {
   const { instances, feed } = useWs();
+
+  // Topic messages are not conversations — exclude from thread grouping
+  const nonTopicFeed = feed.filter(
+    (entry) => !entry.topicName && !entry.message.to?.startsWith?.("topic:"),
+  );
+
   const [instanceA, setInstanceA] = useState<string | null>(null);
   const [instanceB, setInstanceB] = useState<string | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<FeedMessage | null>(null);
@@ -156,7 +162,7 @@ export default function ConversationsPage() {
         </div>
         <ConversationView
           instances={instances}
-          feed={feed}
+          feed={nonTopicFeed}
           instanceA={instanceA}
           instanceB={instanceB}
           selectedMessage={selectedMessage}

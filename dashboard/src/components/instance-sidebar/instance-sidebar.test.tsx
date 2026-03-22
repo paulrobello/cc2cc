@@ -26,10 +26,12 @@ const INSTANCES: Map<string, InstanceState> = new Map([
   ],
 ]);
 
+const EMPTY_TOPICS = new Map();
+
 describe("InstanceSidebar", () => {
   it("renders all instances including offline", () => {
     render(
-      <InstanceSidebar instances={INSTANCES} selectedId={null} onSelect={() => {}} />,
+      <InstanceSidebar instances={INSTANCES} topics={EMPTY_TOPICS} selectedId={null} onSelect={() => {}} />,
     );
     expect(screen.getByText("paul@mac:cc2cc")).toBeInTheDocument();
     expect(screen.getByText("alice@srv:api")).toBeInTheDocument();
@@ -37,7 +39,7 @@ describe("InstanceSidebar", () => {
 
   it("shows queue depth badge for instance with queued messages", () => {
     render(
-      <InstanceSidebar instances={INSTANCES} selectedId={null} onSelect={() => {}} />,
+      <InstanceSidebar instances={INSTANCES} topics={EMPTY_TOPICS} selectedId={null} onSelect={() => {}} />,
     );
     expect(screen.getByText("3")).toBeInTheDocument();
   });
@@ -45,7 +47,7 @@ describe("InstanceSidebar", () => {
   it("calls onSelect with instanceId when clicked", () => {
     const onSelect = jest.fn();
     render(
-      <InstanceSidebar instances={INSTANCES} selectedId={null} onSelect={onSelect} />,
+      <InstanceSidebar instances={INSTANCES} topics={EMPTY_TOPICS} selectedId={null} onSelect={onSelect} />,
     );
     fireEvent.click(screen.getByText("paul@mac:cc2cc"));
     expect(onSelect).toHaveBeenCalledWith("paul@mac:cc2cc/abc");
@@ -55,6 +57,7 @@ describe("InstanceSidebar", () => {
     render(
       <InstanceSidebar
         instances={INSTANCES}
+        topics={EMPTY_TOPICS}
         selectedId="paul@mac:cc2cc/abc"
         onSelect={() => {}}
       />,

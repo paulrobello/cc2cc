@@ -31,9 +31,10 @@ describe("MessageFeed", () => {
 
   it("shows type filter chips", () => {
     render(<MessageFeed feed={[]} filterInstanceId={null} />);
-    expect(screen.getByRole("button", { name: /all/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /task/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /result/i })).toBeInTheDocument();
+    // The feed filter bar and type filter strip both have "all" — use getAllByRole
+    expect(screen.getAllByRole("button", { name: /all/i }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("button", { name: /^task$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^result$/i })).toBeInTheDocument();
   });
 
   it("filters messages by type when chip is clicked", () => {
