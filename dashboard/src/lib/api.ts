@@ -1,5 +1,6 @@
 // dashboard/src/lib/api.ts
 import { InstanceInfoSchema, type MessageType } from "@cc2cc/shared";
+import type { TopicInfo } from "@cc2cc/shared";
 import { z } from "zod";
 import type { HubStats } from "@/types/dashboard";
 
@@ -122,4 +123,46 @@ export async function sendBroadcast(
   if (!res.ok) {
     throw new Error(`Broadcast failed: ${res.status} ${res.statusText}`);
   }
+}
+
+export async function fetchTopics(): Promise<TopicInfo[]> {
+  const res = await fetch(hubUrl("/api/topics"));
+  if (!res.ok) throw new Error("Failed to fetch topics");
+  return res.json() as Promise<TopicInfo[]>;
+}
+
+export async function createTopic(name: string): Promise<TopicInfo> {
+  const res = await fetch(hubUrl("/api/topics"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error("Failed to create topic");
+  return res.json() as Promise<TopicInfo>;
+}
+
+export async function deleteTopic(name: string): Promise<void> {
+  const res = await fetch(hubUrl(`/api/topics/${encodeURIComponent(name)}`), { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json() as { error?: string };
+    throw new Error(body.error ?? "Failed to delete topic");
+  }
+}
+
+export async function subscribeToTopic(name: string, instanceId: string): Promise<void> {
+  const res = await fetch(hubUrl(`/api/topics/${encodeURIComponent(name)}/subscribe`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instanceId }),
+  });
+  if (!res.ok) throw new Error("Failed to subscribe");
+}
+
+export async function unsubscribeFromTopic(name: string, instanceId: string): Promise<void> {
+  const res = await fetch(hubUrl(`/api/topics/${encodeURIComponent(name)}/unsubscribe`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instanceId }),
+  });
+  if (!res.ok) throw new Error("Failed to unsubscribe");
 }
