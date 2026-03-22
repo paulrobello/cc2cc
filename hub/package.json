@@ -1,0 +1,26 @@
+{
+  "name": "@cc2cc/hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "bun --watch --env-file=../.env src/index.ts",
+    "start": "bun --env-file=../.env src/index.ts",
+    "build": "echo 'hub: no separate build step (bun runs TS directly)'",
+    "test": "bun test tests/",
+    "lint": "bunx biome lint ./src ./tests",
+    "fmt": "bunx biome format --write ./src ./tests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cc2cc/shared": "workspace:*",
+    "hono": "latest",
+    "ioredis": "latest"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "latest",
+    "@types/bun": "latest",
+    "typescript": "latest"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "cc2cc": {
+      "command": "bun",
+      "args": ["run", "/Users/probello/Repos/cc2cc/plugin/src/index.ts"],
+      "env": {
+        "CC2CC_HUB_URL": "${CC2CC_HUB_URL}",
+        "CC2CC_API_KEY": "${CC2CC_API_KEY}",
+        "CC2CC_USERNAME": "${CC2CC_USERNAME}",
+        "CC2CC_HOST": "${CC2CC_HOST}"
+      }
+    }
+  }
+}
