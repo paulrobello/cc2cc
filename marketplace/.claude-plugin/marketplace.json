@@ -1,0 +1,29 @@
+{
+  "name": "cc2cc-local",
+  "owner": {
+    "name": "Paul Robello",
+    "email": "probello@gmail.com"
+  },
+  "metadata": {
+    "description": "cc2cc Claude Code plugin marketplace",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "cc2cc",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/paulrobello/cc2cc",
+        "path": "skill"
+      },
+      "description": "Claude-to-Claude communications — collaborate with other Claude Code instances via typed messages on the LAN.",
+      "author": {
+        "name": "Paul Robello",
+        "email": "probello@gmail.com"
+      },
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": ["collaboration", "multi-agent", "websocket", "mcp", "lan"]
+    }
+  ]
+}

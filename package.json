@@ -1,0 +1,22 @@
+{
+  "name": "cc2cc",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "hub",
+    "plugin",
+    "dashboard"
+  ],
+  "scripts": {
+    "build": "bun run --workspaces build",
+    "test": "bun run --workspaces test",
+    "lint": "bun run --workspaces lint",
+    "fmt": "bun run --workspaces fmt",
+    "typecheck": "bun run --workspaces typecheck",
+    "checkall": "bun run fmt && bun run lint && bun run typecheck && bun run test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

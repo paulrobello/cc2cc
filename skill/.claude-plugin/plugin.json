@@ -1,0 +1,24 @@
+{
+  "name": "cc2cc",
+  "version": "0.2.2",
+  "description": "Claude-to-Claude communications — collaborate with other Claude Code instances via typed messages.",
+  "author": {
+    "name": "Paul Robello",
+    "email": "probello@gmail.com",
+    "url": "https://github.com/paulrobello"
+  },
+  "repository": "https://github.com/paulrobello/cc2cc",
+  "license": "MIT",
+  "keywords": ["mcp", "collaboration", "multi-agent", "claude-code"],
+  "mcpServers": "./.mcp.json",
+  "requiredEnv": [
+    "CC2CC_HUB_URL",
+    "CC2CC_API_KEY"
+  ],
+  "optionalEnv": [
+    "CC2CC_USERNAME",
+    "CC2CC_HOST",
+    "CC2CC_PROJECT"
+  ],
+  "readme": "Install: add this plugin to your Claude Code project via `claude plugin add ./skill/plugin.json`.\nRequires the cc2cc hub to be running and CC2CC_HUB_URL + CC2CC_API_KEY to be set in your environment.\nSee the hub README for startup instructions."
+}

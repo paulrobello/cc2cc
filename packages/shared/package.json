@@ -1,0 +1,25 @@
+{
+  "name": "@cc2cc/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "echo 'shared: no build step (source imports)'",
+    "test": "bun test tests/",
+    "lint": "bunx biome lint ./src ./tests",
+    "fmt": "bunx biome format --write ./src ./tests",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
+    "@types/bun": "^1.3.11",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+*.local
+*.local.*
+*-mcp.json
+.gemini-clipboard
+claude_scratch/
+.idea
+settings.local.json
+CLAUDE.local.md
+.superpowers/
+.cc2cc-session-id
+.claude/.cc2cc-session-id

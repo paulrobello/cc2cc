@@ -1,0 +1,80 @@
+# dashboard/Dockerfile
+#
+# SECURITY WARNING — LAN-ONLY DEPLOYMENT
+# ─────────────────────────────────────────────────────────────────────────────
+# NEXT_PUBLIC_CC2CC_HUB_API_KEY is baked into the static JavaScript bundle at
+# build time by the ARG/ENV directives below. Any user who can open this
+# dashboard in a browser can extract the hub API key from the bundle.
+#
+# This image MUST only be deployed on a trusted private LAN. NEVER:
+#   - expose port 8029 to the internet
+#   - place this container behind a public-facing reverse proxy
+#   - deploy to cloud environments accessible by untrusted users
+#
+# For internet-facing deployments, implement a BFF (Backend-For-Frontend)
+# pattern: remove NEXT_PUBLIC_CC2CC_HUB_API_KEY from the build args and proxy
+# all hub requests through authenticated Next.js API routes that hold the key
+# server-side. See README.md § Security > Dashboard Deployment Warning.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# SEC-016: These stages use mutable tags (oven/bun:1-alpine). For production builds, pin to
+# SHA digests to ensure reproducibility: FROM oven/bun@sha256:<digest>
+# Retrieve the digest: docker pull oven/bun:1-alpine && docker inspect oven/bun:1-alpine --format='{{index .RepoDigests 0}}'
+# ── Stage 1: dependencies ──────────────────────────────────────────────────────
+FROM oven/bun:1-alpine AS deps
+WORKDIR /app
+
+# Copy workspace root configs needed for workspace resolution
+COPY package.json bun.lockb* ./
+COPY packages/shared/package.json ./packages/shared/
+
+# Copy dashboard manifests
+COPY dashboard/package.json ./dashboard/
+
+# Install all workspace dependencies
+RUN bun install --frozen-lockfile
+
+# ── Stage 2: builder ───────────────────────────────────────────────────────────
+FROM oven/bun:1-alpine AS builder
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules 2>/dev/null || true
+
+# Copy shared package source (dashboard imports from @cc2cc/shared)
+COPY packages/shared ./packages/shared
+
+# Copy dashboard source
+COPY dashboard ./dashboard
+
+# Build args become NEXT_PUBLIC_* env vars baked into the static build
+ARG NEXT_PUBLIC_CC2CC_HUB_WS_URL=ws://localhost:3100
+ARG NEXT_PUBLIC_CC2CC_HUB_API_KEY=change-me
+
+ENV NEXT_PUBLIC_CC2CC_HUB_WS_URL=$NEXT_PUBLIC_CC2CC_HUB_WS_URL
+ENV NEXT_PUBLIC_CC2CC_HUB_API_KEY=$NEXT_PUBLIC_CC2CC_HUB_API_KEY
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN cd dashboard && bun run build
+
+# ── Stage 3: runner ────────────────────────────────────────────────────────────
+FROM oven/bun:1-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=8029
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Copy built output
+COPY --from=builder /app/dashboard/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/dashboard/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/dashboard/.next/static ./.next/static
+
+USER nextjs
+
+EXPOSE 8029
+
+CMD ["bun", "server.js"]

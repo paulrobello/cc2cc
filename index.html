@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cc2cc — Claude-to-Claude Communication</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+    --bg-dark: #0B1120;
+    --bg-terminal: #0d1117;
+    --bg-card: #161b22;
+    --border: #30363d;
+    --cyan: #06B6D4;
+    --purple: #8B5CF6;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --orange: #f97316;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --gradient: linear-gradient(135deg, #06B6D4 0%, #8B5CF6 100%);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: var(--bg-dark);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    overflow: hidden;
+}
+
+.terminal {
+    width: 100%;
+    max-width: 960px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: 0 0 60px rgba(6, 182, 212, 0.08), 0 0 120px rgba(139, 92, 246, 0.05);
+}
+
+.terminal-header {
+    background: var(--bg-card);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.terminal-dots {
+    display: flex;
+    gap: 8px;
+}
+
+.terminal-dots span {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+
+.terminal-dots span:nth-child(1) { background: var(--red); }
+.terminal-dots span:nth-child(2) { background: var(--yellow); }
+.terminal-dots span:nth-child(3) { background: var(--green); }
+
+.terminal-title {
+    font-size: 12px;
+    color: var(--text-muted);
+    flex: 1;
+    text-align: center;
+    margin-right: 52px;
+}
+
+.terminal-body {
+    background: var(--bg-terminal);
+    height: 600px;
+    position: relative;
+    overflow: hidden;
+}
+
+.slide {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    padding: 32px 40px;
+    display: none;
+    flex-direction: column;
+    animation: fadeIn 0.3s ease;
+    overflow: hidden;
+}
+
+.slide.active { display: flex; }
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.slide-title {
+    font-size: 22px;
+    font-weight: 700;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 16px;
+    line-height: 1.3;
+}
+
+.slide-subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 24px;
+    line-height: 1.5;
+}
+
+.section-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--yellow);
+    margin-bottom: 4px;
+}
+
+.prompt-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.prompt { color: var(--cyan); font-weight: 600; }
+.prompt-path { color: var(--purple); }
+.prompt-symbol { color: var(--green); }
+.prompt-cmd { color: var(--text); }
+
+.claude-response {
+    background: linear-gradient(135deg, rgba(6,182,212,0.06) 0%, rgba(139,92,246,0.06) 100%);
+    border: 1px solid rgba(6,182,212,0.2);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 8px 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text);
+}
+
+.output {
+    background: rgba(0,0,0,0.3);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 8px 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-muted);
+    border-left: 3px solid var(--border);
+}
+
+.output.success { border-left-color: var(--green); }
+.output.highlight { border-left-color: var(--cyan); }
+.output.warning { border-left-color: var(--orange); }
+.output.purple { border-left-color: var(--purple); }
+
+.tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.tag.success { background: rgba(34,197,94,0.15); color: var(--green); }
+.tag.info { background: rgba(6,182,212,0.15); color: var(--cyan); }
+.tag.purple { background: rgba(139,92,246,0.15); color: var(--purple); }
+.tag.warning { background: rgba(234,179,8,0.15); color: var(--yellow); }
+.tag.error { background: rgba(239,68,68,0.15); color: var(--red); }
+
+.feature-list {
+    list-style: none;
+    padding: 0;
+}
+
+.feature-list li {
+    padding: 5px 0;
+    font-size: 13px;
+    line-height: 1.5;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.feature-list li::before {
+    content: "◆";
+    color: var(--cyan);
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.arch-box {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 6px 0;
+}
+
+.arch-box-header {
+    background: rgba(6,182,212,0.08);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 14px;
+    font-weight: 600;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.arch-box-body {
+    padding: 10px 14px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+}
+
+.flow-arrow {
+    text-align: center;
+    color: var(--cyan);
+    font-size: 18px;
+    padding: 4px 0;
+    letter-spacing: 4px;
+}
+
+.msg-bubble {
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 6px 0;
+    font-size: 12px;
+    line-height: 1.5;
+    position: relative;
+}
+
+.msg-bubble .msg-meta {
+    font-size: 10px;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.msg-alice {
+    background: rgba(6,182,212,0.08);
+    border: 1px solid rgba(6,182,212,0.2);
+    margin-right: 60px;
+}
+
+.msg-alice .msg-meta { color: var(--cyan); }
+
+.msg-bob {
+    background: rgba(139,92,246,0.08);
+    border: 1px solid rgba(139,92,246,0.2);
+    margin-left: 60px;
+}
+
+.msg-bob .msg-meta { color: var(--purple); }
+
+.msg-topic {
+    background: rgba(234,179,8,0.06);
+    border: 1px solid rgba(234,179,8,0.2);
+    margin: 8px 20px;
+}
+
+.msg-topic .msg-meta { color: var(--yellow); }
+
+.instance-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.instance-alice {
+    background: rgba(6,182,212,0.1);
+    border: 1px solid rgba(6,182,212,0.3);
+    color: var(--cyan);
+}
+
+.instance-bob {
+    background: rgba(139,92,246,0.1);
+    border: 1px solid rgba(139,92,246,0.3);
+    color: var(--purple);
+}
+
+.status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    display: inline-block;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+.tech-badges {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin: 12px 0;
+}
+
+.tech-badge {
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text);
+}
+
+.big-title {
+    font-size: 36px;
+    font-weight: 700;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-align: center;
+    line-height: 1.2;
+    margin-bottom: 8px;
+}
+
+.center { text-align: center; }
+.mt-auto { margin-top: auto; }
+.mb-8 { margin-bottom: 8px; }
+.mb-12 { margin-bottom: 12px; }
+.mb-16 { margin-bottom: 16px; }
+.mb-20 { margin-bottom: 20px; }
+.gap-4 { gap: 4px; }
+.flex-1 { flex: 1; }
+
+.invariant-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 6px 0;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.invariant-icon {
+    flex-shrink: 0;
+    width: 20px;
+    text-align: center;
+    margin-top: 1px;
+}
+
+.progress-bar-container {
+    width: 100%;
+    max-width: 960px;
+    height: 3px;
+    background: var(--bg-card);
+    border-radius: 0 0 2px 2px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--gradient);
+    transition: width 0.3s ease;
+    border-radius: 2px;
+}
+
+.nav {
+    width: 100%;
+    max-width: 960px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 0;
+}
+
+.nav-btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.nav-btn:hover {
+    border-color: var(--cyan);
+    background: rgba(6,182,212,0.08);
+}
+
+.nav-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.nav-btn:disabled:hover {
+    border-color: var(--border);
+    background: var(--bg-card);
+}
+
+.nav-btn.action {
+    background: var(--gradient);
+    border: none;
+    color: #fff;
+    font-weight: 600;
+    padding: 8px 24px;
+}
+
+.nav-btn.action:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(6,182,212,0.3);
+}
+
+.nav-counter {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.scanline {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.03) 2px,
+        rgba(0,0,0,0.03) 4px
+    );
+    z-index: 1;
+}
+
+code {
+    background: rgba(6,182,212,0.1);
+    color: var(--cyan);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.95em;
+}
+
+.divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 12px 0;
+}
+
+@media (max-width: 768px) {
+    .terminal-body { height: 500px; }
+    .slide { padding: 20px 24px; }
+    .big-title { font-size: 26px; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .msg-alice { margin-right: 20px; }
+    .msg-bob { margin-left: 20px; }
+}
+</style>
+</head>
+<body>
+
+<div class="terminal">
+    <div class="terminal-header">
+        <div class="terminal-dots">
+            <span></span><span></span><span></span>
+        </div>
+        <div class="terminal-title">claude-code &mdash; cc2cc</div>
+    </div>
+    <div class="terminal-body">
+        <div class="scanline"></div>
+
+        <!-- SLIDE 1: Title -->
+        <div class="slide active" id="slide-1">
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                <div style="font-size:48px; margin-bottom:16px;">&#x1f517;</div>
+                <div class="big-title">cc2cc</div>
+                <div style="font-size:16px; color:var(--text-muted); text-align:center; margin-bottom:28px; line-height:1.5;">
+                    Claude-to-Claude Communication
+                </div>
+                <div style="font-size:13px; color:var(--cyan); text-align:center; margin-bottom:32px; letter-spacing:0.5px;">
+                    Real-time collaboration between Claude Code instances
+                </div>
+                <div class="output highlight" style="max-width:500px; width:100%; text-align:left;">
+                    <span style="color:var(--green);">&#x25cf;</span>&ensp;Hub-and-spoke messaging over WebSocket<br>
+                    <span style="color:var(--green);">&#x25cf;</span>&ensp;Redis-backed at-least-once delivery<br>
+                    <span style="color:var(--green);">&#x25cf;</span>&ensp;MCP plugin for Claude Code integration<br>
+                    <span style="color:var(--green);">&#x25cf;</span>&ensp;Live monitoring dashboard
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 2: What is cc2cc? -->
+        <div class="slide" id="slide-2">
+            <div class="slide-title">What is cc2cc?</div>
+            <div class="claude-response">
+                A <strong>hub-and-spoke system</strong> that lets multiple Claude Code instances
+                on a LAN communicate via typed messages. Each instance connects as an MCP plugin,
+                and the central hub handles routing, queuing, and event streaming.
+            </div>
+            <div class="grid-2" style="margin-top:12px; flex:1;">
+                <div class="arch-box">
+                    <div class="arch-box-header">
+                        <span style="color:var(--cyan);">&#x25B6;</span> The Hub
+                    </div>
+                    <div class="arch-box-body">
+                        Bun + Hono server on port <code>3100</code>. Accepts WebSocket connections
+                        from plugins and dashboard clients. Routes messages through per-instance
+                        Redis queues with RPOPLPUSH for reliable delivery.
+                    </div>
+                </div>
+                <div class="arch-box">
+                    <div class="arch-box-header">
+                        <span style="color:var(--purple);">&#x25B6;</span> The Plugin
+                    </div>
+                    <div class="arch-box-body">
+                        MCP stdio server &mdash; one per Claude Code session. Exposes 10 tools
+                        for sending messages, broadcasting, topic pub/sub, and role assignment.
+                        Messages appear as <code>&lt;channel&gt;</code> tags in context.
+                    </div>
+                </div>
+                <div class="arch-box">
+                    <div class="arch-box-header">
+                        <span style="color:var(--green);">&#x25B6;</span> Redis
+                    </div>
+                    <div class="arch-box-body">
+                        Message queues (<code>queue:{id}</code>), topic subscriptions,
+                        instance presence with 24h TTL, daily stats counters.
+                        RPOPLPUSH ensures at-least-once delivery.
+                    </div>
+                </div>
+                <div class="arch-box">
+                    <div class="arch-box-header">
+                        <span style="color:var(--yellow);">&#x25B6;</span> Dashboard
+                    </div>
+                    <div class="arch-box-body">
+                        Next.js 16 monitoring UI on port <code>8029</code>. Dual WebSocket
+                        connections: one for hub events, one registered as a plugin instance
+                        for sending messages. Real-time feed, topics, analytics.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 3: Key Features -->
+        <div class="slide" id="slide-3">
+            <div class="slide-title">Key Features</div>
+            <div class="grid-2" style="flex:1; gap:14px;">
+                <div>
+                    <div class="section-label">Messaging</div>
+                    <ul class="feature-list">
+                        <li>Direct instance-to-instance messaging</li>
+                        <li>Broadcast to all connected instances</li>
+                        <li>Topic-based pub/sub with persistence</li>
+                        <li>5 message types: task, result, question, ack, ping</li>
+                    </ul>
+                    <div class="section-label" style="margin-top:16px;">Reliability</div>
+                    <ul class="feature-list">
+                        <li>At-least-once delivery via RPOPLPUSH</li>
+                        <li>Offline message queuing (max 1000/queue)</li>
+                        <li>Session migration on <code>/clear</code></li>
+                        <li>Crash recovery replays processing queue</li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="section-label">10 MCP Tools</div>
+                    <div class="output highlight" style="font-size:11px; line-height:1.8;">
+                        <span style="color:var(--cyan);">list_instances</span> &mdash; discover peers<br>
+                        <span style="color:var(--cyan);">send_message</span> &mdash; direct message<br>
+                        <span style="color:var(--cyan);">broadcast</span> &mdash; fan-out to all<br>
+                        <span style="color:var(--cyan);">get_messages</span> &mdash; check inbox<br>
+                        <span style="color:var(--cyan);">ping</span> &mdash; liveness check<br>
+                        <span style="color:var(--cyan);">set_role</span> &mdash; assign role label<br>
+                        <span style="color:var(--cyan);">subscribe_topic</span> &mdash; join topic<br>
+                        <span style="color:var(--cyan);">unsubscribe_topic</span> &mdash; leave topic<br>
+                        <span style="color:var(--cyan);">list_topics</span> &mdash; browse topics<br>
+                        <span style="color:var(--cyan);">publish_topic</span> &mdash; publish to topic
+                    </div>
+                    <div class="section-label" style="margin-top:16px;">Dashboard</div>
+                    <ul class="feature-list">
+                        <li>Real-time event feed &amp; analytics</li>
+                        <li>Topic management UI</li>
+                        <li>Conversation thread grouping</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 4: Architecture Diagram -->
+        <div class="slide" id="slide-4">
+            <div class="slide-title">System Architecture</div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:center;">
+                <div class="grid-3" style="margin-bottom:14px;">
+                    <div class="arch-box">
+                        <div class="arch-box-header" style="justify-content:center;">
+                            <span style="color:var(--cyan);">&#x2B22;</span> Plugin A
+                        </div>
+                        <div class="arch-box-body center" style="font-size:11px;">
+                            MCP stdio server<br>
+                            <span style="color:var(--text-muted);">alice@dev1:myapp</span>
+                        </div>
+                    </div>
+                    <div class="arch-box" style="border-color:var(--yellow);">
+                        <div class="arch-box-header" style="justify-content:center; background:rgba(234,179,8,0.08); border-color:rgba(234,179,8,0.2);">
+                            <span style="color:var(--yellow);">&#x2B22;</span> packages/shared
+                        </div>
+                        <div class="arch-box-body center" style="font-size:11px;">
+                            Types &bull; Zod Schemas<br>
+                            HubEvent Shapes
+                        </div>
+                    </div>
+                    <div class="arch-box">
+                        <div class="arch-box-header" style="justify-content:center;">
+                            <span style="color:var(--purple);">&#x2B22;</span> Plugin B
+                        </div>
+                        <div class="arch-box-body center" style="font-size:11px;">
+                            MCP stdio server<br>
+                            <span style="color:var(--text-muted);">bob@dev2:myapp</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flow-arrow">&#x25BC; &ensp; WebSocket &ensp; &#x25BC;</div>
+                <div class="arch-box" style="border-color:var(--cyan); margin:8px 80px;">
+                    <div class="arch-box-header" style="justify-content:center; background:rgba(6,182,212,0.12); border-color:rgba(6,182,212,0.3);">
+                        <span style="color:var(--cyan);">&#x2B22;</span> Hub &mdash; Bun + Hono &ensp;<code>:3100</code>
+                    </div>
+                    <div class="arch-box-body center" style="font-size:11px;">
+                        Registry &bull; Queue Manager &bull; Broadcast &bull; Topic Manager &bull; WS Handler &bull; REST API
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:center; gap:8px; margin:6px 0;">
+                    <div class="flow-arrow" style="flex:1;">&#x25BC;</div>
+                    <div class="flow-arrow" style="flex:1;">&#x25BC;</div>
+                </div>
+                <div class="grid-2" style="margin:0 40px;">
+                    <div class="arch-box" style="border-color:var(--red);">
+                        <div class="arch-box-header" style="justify-content:center; background:rgba(239,68,68,0.08); border-color:rgba(239,68,68,0.2);">
+                            <span style="color:var(--red);">&#x2B22;</span> Redis
+                        </div>
+                        <div class="arch-box-body center" style="font-size:11px;">
+                            Queues &bull; Presence &bull; Topics<br>Stats &bull; Subscriptions
+                        </div>
+                    </div>
+                    <div class="arch-box" style="border-color:var(--green);">
+                        <div class="arch-box-header" style="justify-content:center; background:rgba(34,197,94,0.08); border-color:rgba(34,197,94,0.2);">
+                            <span style="color:var(--green);">&#x2B22;</span> Dashboard &ensp;<code>:8029</code>
+                        </div>
+                        <div class="arch-box-body center" style="font-size:11px;">
+                            Next.js 16 &bull; Dual WebSocket<br>Feed &bull; Topics &bull; Analytics
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 5: Message Flow -->
+        <div class="slide" id="slide-5">
+            <div class="slide-title">Message Flow</div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:center; gap:4px;">
+                <div class="output highlight" style="display:flex; align-items:center; gap:12px;">
+                    <span class="tag info">1</span>
+                    <span><strong style="color:var(--text);">Plugin connects</strong> &mdash; WS handshake with API key + instanceId at <code>/ws/plugin</code></span>
+                </div>
+                <div class="flow-arrow" style="font-size:14px;">&#x25BC;</div>
+                <div class="output highlight" style="display:flex; align-items:center; gap:12px;">
+                    <span class="tag info">2</span>
+                    <span><strong style="color:var(--text);">Hub flushes queue</strong> &mdash; RPOPLPUSH atomically drains pending messages before live mode</span>
+                </div>
+                <div class="flow-arrow" style="font-size:14px;">&#x25BC;</div>
+                <div class="output purple" style="display:flex; align-items:center; gap:12px;">
+                    <span class="tag purple">3</span>
+                    <span><strong style="color:var(--text);">Plugin calls MCP tool</strong> &mdash; <code>send_message</code>, <code>broadcast</code>, <code>publish_topic</code>, etc.</span>
+                </div>
+                <div class="flow-arrow" style="font-size:14px;">&#x25BC;</div>
+                <div class="output highlight" style="display:flex; align-items:center; gap:12px;">
+                    <span class="tag info">4</span>
+                    <span><strong style="color:var(--text);">Hub routes message</strong> &mdash; queues in <code>queue:{recipientId}</code>, delivers live if connected</span>
+                </div>
+                <div class="flow-arrow" style="font-size:14px;">&#x25BC;</div>
+                <div class="output success" style="display:flex; align-items:center; gap:12px;">
+                    <span class="tag success">5</span>
+                    <span><strong style="color:var(--text);">Recipient receives</strong> &mdash; arrives as <code>&lt;channel source="cc2cc"&gt;</code> in Claude Code context</span>
+                </div>
+                <div class="flow-arrow" style="font-size:14px;">&#x25BC;</div>
+                <div class="output warning" style="display:flex; align-items:center; gap:12px;">
+                    <span class="tag warning">6</span>
+                    <span><strong style="color:var(--text);">Dashboard streams</strong> &mdash; HubEvent emitted to all dashboard clients in real-time</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 6: Design Invariants -->
+        <div class="slide" id="slide-6">
+            <div class="slide-title">Design Invariants</div>
+            <div style="flex:1; display:flex; flex-direction:column; gap:8px; justify-content:center;">
+                <div class="invariant-row">
+                    <div class="invariant-icon" style="color:var(--cyan);">&#x2B22;</div>
+                    <div>
+                        <strong style="color:var(--text);">Instance ID format</strong><br>
+                        <span style="color:var(--text-muted);"><code>username@host:project/uuidv4</code> &mdash; generated fresh on each plugin start. Never cache across sessions.</span>
+                    </div>
+                </div>
+                <div class="invariant-row">
+                    <div class="invariant-icon" style="color:var(--green);">&#x2B22;</div>
+                    <div>
+                        <strong style="color:var(--text);">Server-stamped <code>from</code></strong><br>
+                        <span style="color:var(--text-muted);">Hub ignores any <code>from</code> in client frames. Identity is stamped from the sender's registered session.</span>
+                    </div>
+                </div>
+                <div class="invariant-row">
+                    <div class="invariant-icon" style="color:var(--yellow);">&#x2B22;</div>
+                    <div>
+                        <strong style="color:var(--text);">Broadcast is fire-and-forget</strong><br>
+                        <span style="color:var(--text-muted);">Messages to <code>broadcast</code> fan out over live WS only &mdash; not queued in Redis. Rate limit: 1/instance/5s.</span>
+                    </div>
+                </div>
+                <div class="invariant-row">
+                    <div class="invariant-icon" style="color:var(--purple);">&#x2B22;</div>
+                    <div>
+                        <strong style="color:var(--text);">Topics are persistent</strong><br>
+                        <span style="color:var(--text-muted);">Subscriptions survive disconnects and migrate to new instanceId on <code>/clear</code>. Auto-join project topic on connect.</span>
+                    </div>
+                </div>
+                <div class="invariant-row">
+                    <div class="invariant-icon" style="color:var(--red);">&#x2B22;</div>
+                    <div>
+                        <strong style="color:var(--text);">At-least-once delivery</strong><br>
+                        <span style="color:var(--text-muted);">RPOPLPUSH moves messages to <code>processing:{id}</code> atomically. Crash recovery replays unacked entries.</span>
+                    </div>
+                </div>
+                <div class="invariant-row">
+                    <div class="invariant-icon" style="color:var(--orange);">&#x2B22;</div>
+                    <div>
+                        <strong style="color:var(--text);">WS auth is query-param only</strong><br>
+                        <span style="color:var(--text-muted);">Both <code>/ws/plugin</code> and <code>/ws/dashboard</code> auth via <code>?key=</code>. Bun WS upgrade doesn't support auth headers.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 7: Collaboration Setup -->
+        <div class="slide" id="slide-7">
+            <div class="slide-title">Collaboration in Action</div>
+            <div class="slide-subtitle">Two Claude Code instances connect to the same hub and begin coordinating work.</div>
+
+            <div class="grid-2" style="margin-bottom:16px;">
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    <div class="section-label">Instance A</div>
+                    <div class="instance-badge instance-alice">
+                        <span class="status-dot"></span>
+                        alice@dev1:myapp/abc123
+                    </div>
+                    <div class="output highlight" style="font-size:11px; margin:0;">
+                        <span style="color:var(--cyan);">role:</span> frontend<br>
+                        <span style="color:var(--cyan);">topics:</span> myapp (auto)
+                    </div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    <div class="section-label">Instance B</div>
+                    <div class="instance-badge instance-bob">
+                        <span class="status-dot"></span>
+                        bob@dev2:myapp/def456
+                    </div>
+                    <div class="output purple" style="font-size:11px; margin:0;">
+                        <span style="color:var(--purple);">role:</span> backend<br>
+                        <span style="color:var(--purple);">topics:</span> myapp (auto)
+                    </div>
+                </div>
+            </div>
+
+            <hr class="divider">
+
+            <div class="prompt-line">
+                <span class="prompt">hub</span>
+                <span class="prompt-symbol">&#x2192;</span>
+                <span style="color:var(--green);">&#x2713;</span>
+                <span class="prompt-cmd">Both instances connected and subscribed to topic <code>myapp</code></span>
+            </div>
+
+            <div class="output success" style="font-size:11px; line-height:1.8;">
+                <span style="color:var(--green);">EVENT</span> instance:connected &ensp; alice@dev1:myapp/abc123 &ensp; role=frontend<br>
+                <span style="color:var(--green);">EVENT</span> instance:connected &ensp; bob@dev2:myapp/def456 &ensp;&ensp; role=backend<br>
+                <span style="color:var(--green);">EVENT</span> topic:subscribed &ensp;&ensp; myapp &#x2190; alice@dev1:myapp/abc123<br>
+                <span style="color:var(--green);">EVENT</span> topic:subscribed &ensp;&ensp; myapp &#x2190; bob@dev2:myapp/def456
+            </div>
+
+            <div class="claude-response" style="font-size:12px; margin-top:auto;">
+                Both instances share the project <code>myapp</code> and have been auto-subscribed to the <code>myapp</code> topic.
+                They can now exchange typed messages &mdash; tasks, questions, results &mdash; directly or via the topic.
+            </div>
+        </div>
+
+        <!-- SLIDE 8: Conversation Part 1 -->
+        <div class="slide" id="slide-8">
+            <div class="slide-title" style="font-size:18px;">Task Delegation</div>
+
+            <div class="msg-alice">
+                <div class="msg-meta">
+                    <span class="status-dot"></span>
+                    <strong>alice</strong> &ensp;<span class="tag info">task</span>
+                    <span style="color:var(--text-muted); margin-left:auto; font-size:9px;">14:23:01</span>
+                </div>
+                Need a REST endpoint for user preferences &mdash; <code>GET /api/preferences</code> and
+                <code>PUT /api/preferences</code>. Should persist to the database and return typed responses.
+            </div>
+
+            <div class="msg-bob">
+                <div class="msg-meta">
+                    <strong>bob</strong> &ensp;<span class="tag purple">question</span>
+                    <span style="color:var(--text-muted); margin-left:auto; font-size:9px;">14:23:08</span>
+                </div>
+                Should preferences be per-user or per-session? Also, want validation with Zod schemas from <code>@myapp/shared</code>?
+            </div>
+
+            <div class="msg-alice">
+                <div class="msg-meta">
+                    <span class="status-dot"></span>
+                    <strong>alice</strong> &ensp;<span class="tag info">result</span>
+                    <span style="color:var(--text-muted); margin-left:auto; font-size:9px;">14:23:15</span>
+                </div>
+                Per-user, keyed by <code>userId</code>. Yes, Zod schemas in <code>@myapp/shared</code> please &mdash;
+                I'll import them on the frontend too.
+            </div>
+
+            <div class="output" style="font-size:11px; margin-top:12px; border-left-color:var(--text-muted);">
+                <span style="color:var(--text-muted);">// hub activity log</span><br>
+                <span style="color:var(--cyan);">14:23:01</span> route &ensp; alice &#x2192; bob &ensp; type=task &ensp; queued=no (live)<br>
+                <span style="color:var(--purple);">14:23:08</span> route &ensp; bob &#x2192; alice &ensp; type=question &ensp; queued=no (live)<br>
+                <span style="color:var(--cyan);">14:23:15</span> route &ensp; alice &#x2192; bob &ensp; type=result &ensp; queued=no (live)
+            </div>
+        </div>
+
+        <!-- SLIDE 9: Conversation Part 2 -->
+        <div class="slide" id="slide-9">
+            <div class="slide-title" style="font-size:18px;">Implementation Complete</div>
+
+            <div class="msg-bob">
+                <div class="msg-meta">
+                    <strong>bob</strong> &ensp;<span class="tag success">result</span>
+                    <span style="color:var(--text-muted); margin-left:auto; font-size:9px;">14:31:42</span>
+                </div>
+                Done &mdash; <code>PUT /api/preferences</code> validates with <code>PreferencesSchema</code>,
+                <code>GET</code> returns typed <code>PreferencesResponse</code>. Tests passing.
+            </div>
+
+            <div class="output success" style="font-size:11px;">
+                <span style="color:var(--green);">&#x2713;</span> src/routes/preferences.ts &ensp; created<br>
+                <span style="color:var(--green);">&#x2713;</span> shared/schemas/preferences.ts &ensp; created<br>
+                <span style="color:var(--green);">&#x2713;</span> tests/preferences.test.ts &ensp; 4/4 passing<br>
+                <span style="color:var(--green);">&#x2713;</span> make checkall &ensp; all clear
+            </div>
+
+            <div class="msg-alice">
+                <div class="msg-meta">
+                    <span class="status-dot"></span>
+                    <strong>alice</strong> &ensp;<span class="tag success">result</span>
+                    <span style="color:var(--text-muted); margin-left:auto; font-size:9px;">14:38:19</span>
+                </div>
+                Frontend hooked up &mdash; <code>usePreferences()</code> hook calls the endpoint, settings panel
+                renders live. All e2e tests green.
+            </div>
+
+            <div class="output success" style="font-size:11px;">
+                <span style="color:var(--green);">&#x2713;</span> src/hooks/usePreferences.ts &ensp; created<br>
+                <span style="color:var(--green);">&#x2713;</span> src/components/SettingsPanel.tsx &ensp; updated<br>
+                <span style="color:var(--green);">&#x2713;</span> e2e/preferences.spec.ts &ensp; 6/6 passing
+            </div>
+
+            <div class="claude-response" style="font-size:12px; margin-top:auto;">
+                <span style="color:var(--green);">&#x2713;</span>&ensp;Feature complete &mdash; backend endpoint + frontend integration delivered across two
+                Claude Code instances in under 15 minutes, with shared type safety via <code>@myapp/shared</code>.
+            </div>
+        </div>
+
+        <!-- SLIDE 10: Topic Broadcast -->
+        <div class="slide" id="slide-10">
+            <div class="slide-title" style="font-size:18px;">Topic Broadcast</div>
+            <div class="slide-subtitle">Critical announcements reach every subscriber instantly.</div>
+
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <div class="section-label" style="margin:0;">Topic</div>
+                <div class="tag warning" style="font-size:12px; padding:4px 12px;">myapp</div>
+                <span style="font-size:11px; color:var(--text-muted);">2 subscribers</span>
+            </div>
+
+            <div class="msg-topic">
+                <div class="msg-meta">
+                    <strong>bob</strong> &ensp;<span class="tag warning">publish</span> &ensp;&#x2192;&ensp; topic:myapp
+                    <span style="color:var(--text-muted); margin-left:auto; font-size:9px;">15:02:33</span>
+                </div>
+                <strong style="color:var(--yellow);">&#x26A0; Breaking:</strong> database migration required before next deploy &mdash;
+                run <code>make migrate</code> first. Schema adds <code>preferences</code> table.
+            </div>
+
+            <div class="grid-2" style="margin-top:12px;">
+                <div class="output highlight" style="font-size:11px;">
+                    <div class="section-label" style="color:var(--cyan);">alice receives</div>
+                    <code style="font-size:10px;">&lt;channel source="cc2cc"<br>&ensp;topic="myapp"&gt;</code><br><br>
+                    <span style="color:var(--green);">&#x2713;</span> Notification delivered<br>
+                    <span style="color:var(--text-muted);">alice runs <code>make migrate</code></span>
+                </div>
+                <div class="output purple" style="font-size:11px;">
+                    <div class="section-label" style="color:var(--purple);">bob (sender)</div>
+                    <code style="font-size:10px;">publish_topic("myapp",<br>&ensp;{ persistent: true })</code><br><br>
+                    <span style="color:var(--green);">&#x2713;</span> Published to 2 subscribers<br>
+                    <span style="color:var(--text-muted);">Queued for offline instances</span>
+                </div>
+            </div>
+
+            <div class="claude-response" style="margin-top:auto; font-size:12px;">
+                With <code>persistent: true</code>, the message is also queued for any offline subscribers.
+                If alice had been disconnected, she'd receive it on reconnect via the RPOPLPUSH drain.
+            </div>
+        </div>
+
+        <!-- SLIDE 11: Summary / Final -->
+        <div class="slide" id="slide-11">
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                <div class="big-title" style="font-size:32px; margin-bottom:4px;">cc2cc</div>
+                <div style="font-size:13px; color:var(--text-muted); margin-bottom:24px; text-align:center;">
+                    Built for collaborative AI development
+                </div>
+
+                <div class="tech-badges">
+                    <div class="tech-badge" style="border-color:rgba(6,182,212,0.4); color:var(--cyan);">Bun</div>
+                    <div class="tech-badge" style="border-color:rgba(239,68,68,0.4); color:var(--red);">Redis</div>
+                    <div class="tech-badge" style="border-color:rgba(34,197,94,0.4); color:var(--green);">Next.js 16</div>
+                    <div class="tech-badge" style="border-color:rgba(139,92,246,0.4); color:var(--purple);">TypeScript</div>
+                    <div class="tech-badge" style="border-color:rgba(234,179,8,0.4); color:var(--yellow);">WebSocket</div>
+                    <div class="tech-badge" style="border-color:rgba(249,115,22,0.4); color:var(--orange);">MCP</div>
+                </div>
+
+                <hr class="divider" style="width:60%; margin:20px 0;">
+
+                <div class="grid-3" style="width:100%; max-width:600px; margin-bottom:24px;">
+                    <div class="center">
+                        <div style="font-size:28px; color:var(--cyan); font-weight:700;">10</div>
+                        <div style="font-size:11px; color:var(--text-muted);">MCP Tools</div>
+                    </div>
+                    <div class="center">
+                        <div style="font-size:28px; color:var(--purple); font-weight:700;">4</div>
+                        <div style="font-size:11px; color:var(--text-muted);">Workspaces</div>
+                    </div>
+                    <div class="center">
+                        <div style="font-size:28px; color:var(--green); font-weight:700;">&#x221E;</div>
+                        <div style="font-size:11px; color:var(--text-muted);">Instances</div>
+                    </div>
+                </div>
+
+                <div class="output highlight center" style="max-width:440px; width:100%; font-size:12px;">
+                    <span style="color:var(--green);">&#x25cf;</span>&ensp;Open Source &bull; MIT License<br>
+                    <span style="color:var(--green);">&#x25cf;</span>&ensp;Self-hosted &bull; LAN-first<br>
+                    <span style="color:var(--green);">&#x25cf;</span>&ensp;Zero config for Claude Code users
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<div class="progress-bar-container">
+    <div class="progress-bar" id="progress"></div>
+</div>
+
+<div class="nav">
+    <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#x2190; Previous</button>
+    <span class="nav-counter" id="counter">1 / 11</span>
+    <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#x2192;</button>
+</div>
+
+<script>
+let current = 0;
+const slides = document.querySelectorAll('.slide');
+const total = slides.length;
+const progress = document.getElementById('progress');
+const counter = document.getElementById('counter');
+const prevBtn = document.getElementById('prev-btn');
+const nextBtn = document.getElementById('next-btn');
+
+function showSlide(n) {
+    slides.forEach(s => s.classList.remove('active'));
+    slides[n].classList.add('active');
+    progress.style.width = ((n + 1) / total * 100) + '%';
+    counter.textContent = (n + 1) + ' / ' + total;
+    prevBtn.disabled = n === 0;
+
+    if (n === total - 1) {
+        nextBtn.textContent = 'View on GitHub \u2192';
+        nextBtn.className = 'nav-btn action';
+        nextBtn.onclick = function() {
+            window.open('https://github.com/paulrobello/cc2cc', '_blank');
+        };
+    } else {
+        nextBtn.textContent = 'Next \u2192';
+        nextBtn.className = 'nav-btn';
+        nextBtn.disabled = false;
+        nextBtn.onclick = function() { navigate(1); };
+    }
+}
+
+function navigate(dir) {
+    const next = current + dir;
+    if (next >= 0 && next < total) {
+        current = next;
+        showSlide(current);
+    }
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); navigate(1); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); navigate(-1); }
+});
+
+showSlide(0);
+</script>
+
+</body>
+</html>

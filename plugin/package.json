@@ -1,0 +1,30 @@
+{
+  "name": "@cc2cc/plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "bin": {
+    "cc2cc-plugin": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "build": "echo 'plugin: no separate build step (bun runs TS directly)'",
+    "test": "bun test tests/",
+    "lint": "bunx biome lint ./src ./tests",
+    "fmt": "bunx biome format --write ./src ./tests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cc2cc/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "ws": "^8.20.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3"
+  }
+}
