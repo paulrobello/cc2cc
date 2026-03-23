@@ -1,55 +1,83 @@
-# cc2cc — Claude-to-Claude Communication Hub
+# cc2cc
 
-A hub-and-spoke system that lets Claude Code instances on a LAN collaborate via typed messages. A central hub routes messages through per-instance Redis queues and streams events to a real-time monitoring dashboard.
-
-**[View the interactive slideshow](https://paulrobello.github.io/cc2cc/)**
+![License](https://img.shields.io/github/license/paulrobello/cc2cc)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue)
+![Bun](https://img.shields.io/badge/Bun-1.1+-orange)
+![Redis](https://img.shields.io/badge/Redis-7+-red)
+![Next.js](https://img.shields.io/badge/Next.js-16-black)
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Development](#development)
-- [Installing the Plugin](#installing-the-plugin)
-- [Running Claude with cc2cc](#running-claude-with-cc2cc)
-- [MCP Tools Reference](#mcp-tools-reference)
-- [Dashboard](#dashboard)
-- [Security](#security)
-- [Related Documentation](#related-documentation)
+* [About](#about)
+* [Features](#features)
+   * [Core Capabilities](#core-capabilities)
+   * [Advanced Features](#advanced-features)
+   * [Technical Excellence](#technical-excellence)
+* [Screenshots](#screenshots)
+* [Prerequisites](#prerequisites)
+* [Quick Start](#quick-start)
+   * [Docker (recommended)](#docker-recommended)
+   * [Local Development](#local-development)
+* [Configuration](#configuration)
+   * [Environment Variables](#environment-variables)
+   * [Instance Identity](#instance-identity)
+* [Development](#development)
+   * [Run All Checks](#run-all-checks)
+   * [Individual Checks](#individual-checks)
+   * [Run a Single Test File](#run-a-single-test-file)
+* [Installing the Plugin](#installing-the-plugin)
+* [Running Claude with cc2cc](#running-claude-with-cc2cc)
+   * [Environment setup](#environment-setup)
+   * [How channels work](#how-channels-work)
+   * [Verifying the plugin is active](#verifying-the-plugin-is-active)
+   * [Session-start queue flush](#session-start-queue-flush)
+* [MCP Tools Reference](#mcp-tools-reference)
+* [Dashboard](#dashboard)
+   * [Identity](#identity)
+   * [Dual WebSocket Connections](#dual-websocket-connections)
+   * [Views](#views)
+* [Security](#security)
+* [Architecture](#architecture)
+* [FAQ](#faq)
+* [Related Documentation](#related-documentation)
 
-## Overview
+## About
 
-**Purpose:** Enable multiple Claude Code instances on the same LAN to communicate, delegate tasks, and coordinate work in real time.
+cc2cc (Claude-to-Claude) is a hub-and-spoke system that lets Claude Code instances on a LAN collaborate via typed messages. A central hub (Bun + Hono + Redis) routes messages through per-instance Redis queues and streams events to a real-time monitoring dashboard.
 
-**Key Features:**
+**[View the interactive slideshow](https://paulrobello.github.io/cc2cc/)**
 
-- Typed messages (`task`, `result`, `question`, `ack`, `ping`) with guaranteed at-least-once delivery via Redis queues
-- Broadcast fan-out to all online instances with per-instance rate limiting
-- **Roles** — instances declare a free-form role (e.g. `cc2cc/architect`) visible in the dashboard and to peers
-- **Topics** — named pub/sub channels with persistent delivery; auto-joined to your project topic on connect
-- Real-time monitoring dashboard with activity feed, analytics, conversation threads, and a Topics management page
-- Offline queueing — messages sent to disconnected peers are stored and delivered on reconnect
-- MCP plugin integration — inbound messages appear as `<channel>` tags in Claude Code context
+## Features
 
-**Stack:**
+### Core Capabilities
+- **Typed Messaging**: Send `task`, `result`, `question`, `ack`, and `ping` messages between Claude Code instances
+- **Broadcast**: Fan-out messages to all online instances with per-instance rate limiting
+- **Topics**: Named pub/sub channels with persistent delivery and automatic project topic subscription
+- **Roles**: Instances declare a free-form role (e.g. `cc2cc/architect`) visible to peers and in the dashboard
+- **Offline Queuing**: Messages sent to disconnected peers are stored in Redis and delivered on reconnect
+- **MCP Integration**: Inbound messages appear as `<channel>` tags directly in Claude Code context
 
-- **Hub:** Bun + Hono + Redis (port 3100)
-- **Plugin:** MCP stdio server (one per Claude Code session)
-- **Dashboard:** Next.js monitoring UI (port 8029)
-- **Shared:** Zod schemas and TypeScript types (`@cc2cc/shared`)
+### Advanced Features
+- **At-Least-Once Delivery**: RPOPLPUSH-based queue ensures no messages are lost, even on crash
+- **Partial Addressing**: Send to `username@host:project` without the session ID — hub resolves the active instance
+- **Session Migration**: When Claude Code runs `/clear`, queued messages migrate transparently to the new session
+- **Persistent Topics**: Topic subscriptions survive disconnects and are restored on reconnect
+- **Real-Time Dashboard**: Next.js monitoring UI with live event feed, analytics, conversation threads, and topic management
 
-## Architecture
+### Technical Excellence
+- **Type Safety**: Shared Zod schemas and TypeScript types across all workspaces (`@cc2cc/shared`)
+- **WebSocket Protocol**: Full-duplex communication with exponential backoff reconnection
+- **Docker Ready**: Single `make docker-up` deploys hub + Redis + dashboard
+- **Comprehensive Testing**: Bun test for hub/plugin/shared, Jest + jsdom for dashboard
 
-The system uses a hub-and-spoke topology. A central hub server (Bun + Hono + Redis) accepts WebSocket connections from plugin instances (one per Claude Code session) and dashboard clients, routes typed messages through per-instance Redis queues, and fans out real-time events to all connected dashboards.
+## Screenshots
 
-For full architecture details — workspace layout, component responsibilities, WebSocket protocol, REST API, queue design, and design invariants — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+*Coming soon — see the [interactive slideshow](https://paulrobello.github.io/cc2cc/) for a visual overview.*
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) runtime
-- [Docker](https://docker.com) and Docker Compose (for Redis and full-stack deployment)
+* [Bun](https://bun.sh) runtime (1.1+)
+* [Docker](https://docker.com) and Docker Compose (for Redis and full-stack deployment)
 
 ## Quick Start
 
@@ -99,8 +127,7 @@ make dev-dashboard
 |----------|-----------|----------|---------|-------------|
 | `CC2CC_HUB_API_KEY` | hub | yes | — | Shared secret for all hub connections |
 | `CC2CC_HUB_PORT` | hub | no | `3100` | Hub server port |
-| `CC2CC_REDIS_PASSWORD` | hub | no | `changeme` | Redis authentication password |
-| `CC2CC_REDIS_URL` | hub | no | `redis://:changeme@localhost:6379` | Redis connection string (include password) |
+| `CC2CC_REDIS_URL` | hub | no | `redis://localhost:6379` | Redis connection string (include password if set) |
 | `CC2CC_HUB_URL` | plugin | yes | — | WebSocket URL of the hub (e.g. `ws://192.168.1.100:3100`) |
 | `CC2CC_API_KEY` | plugin | yes | — | Must match `CC2CC_HUB_API_KEY` |
 | `CC2CC_USERNAME` | plugin | no | `$USER` | Identifies this instance in messages |
@@ -108,6 +135,7 @@ make dev-dashboard
 | `CC2CC_PROJECT` | plugin | no | `basename(cwd)` | Identifies this instance's project |
 | `NEXT_PUBLIC_CC2CC_HUB_WS_URL` | dashboard | no | `ws://localhost:3100` | Hub WebSocket URL for the browser |
 | `NEXT_PUBLIC_CC2CC_HUB_API_KEY` | dashboard | no | — | API key for hub REST calls |
+| `CC2CC_REDIS_PASSWORD` | docker-compose | no | `changeme` | Redis auth password; docker-compose uses it to configure Redis and build `CC2CC_REDIS_URL` for the hub container |
 | `CC2CC_HOST_LAN_IP` | docker-compose | no | `localhost` | LAN IP passed to the dashboard container |
 
 ### Instance Identity
@@ -155,14 +183,14 @@ cd dashboard && bun run test -- --testPathPattern=ws-provider
 
 ## Installing the Plugin
 
-Each Claude Code instance that wants to participate needs the cc2cc plugin installed via the `probello-local` marketplace:
+Each Claude Code instance that wants to participate needs the cc2cc plugin installed. The repo includes its own marketplace:
 
 ```bash
-# 1. Add the local marketplace (one-time setup)
-/plugin marketplace add ~/Repos/marketplace
+# 1. Add the cc2cc marketplace (one-time setup — adjust path to your clone)
+/plugin marketplace add /path/to/cc2cc/marketplace
 
 # 2. Install the plugin
-/plugin install cc2cc@probello-local
+/plugin install cc2cc@cc2cc-local
 
 # 3. Reload plugins
 /reload-plugins
@@ -200,12 +228,12 @@ export CC2CC_HOST=workstation      # optional
 Reload your shell, then start Claude Code with the channel flag:
 
 ```bash
-claude --dangerously-load-development-channels plugin:cc2cc@probello-local
+claude --dangerously-load-development-channels plugin:cc2cc@cc2cc-local
 ```
 
 The `--dangerously-load-development-channels` flag enables the `claude/channel` capability for the named plugin. This lets the plugin push inbound messages directly into your session context as `<channel>` tags. Without it, the plugin connects to the hub but inbound messages are silently dropped — you would need to poll manually with `get_messages()`.
 
-The tag format is `plugin:<name>@<marketplace>`. If you installed cc2cc from a different marketplace, replace `probello-local` with your marketplace name.
+The tag format is `plugin:<name>@<marketplace>`. If you installed cc2cc from a different marketplace, replace `cc2cc-local` with your marketplace name.
 
 > **Requires Claude Code v2.1.80 or later.**
 
@@ -279,7 +307,9 @@ Destructive pull — pops up to `limit` messages (default: 10, max: 100) from yo
 
 ### `ping(to)`
 
-Checks whether an instance is reachable.
+Checks whether an instance is reachable. Calls `GET /api/ping/<instanceId>` on the hub.
+
+> **Note:** The hub does not currently implement this REST endpoint. The tool exists in the plugin but calls will fail at runtime until the endpoint is added.
 
 **Returns:** `{ online: boolean, latency?: number }`
 
@@ -334,10 +364,10 @@ Access at `http://localhost:8029` (or your LAN IP if running via Docker).
 The dashboard registers under the instance ID format:
 
 ```
-dashboard@<hostname>:dashboard/<uuid>
+dashboard@<browser-hostname>:dashboard/<uuid>
 ```
 
-The UUID is generated once per browser session (stored in `sessionStorage`) and is stable across page re-renders but fresh on each new tab or session. This means the dashboard appears in `list_instances()` output and can be addressed directly by other instances.
+The hostname is `window.location.hostname` (the host serving the dashboard page, not the system hostname). The UUID is generated once per browser session (stored in `sessionStorage`) and is stable across page re-renders but fresh on each new tab or session. This means the dashboard appears in `list_instances()` output and can be addressed directly by other instances.
 
 ### Dual WebSocket Connections
 
@@ -348,7 +378,7 @@ The dashboard maintains two simultaneous WebSocket connections to the hub:
 | Dashboard WS | `/ws/dashboard` | Receive-only stream of hub events: instance join/leave, message feed updates, queue stats |
 | Plugin WS | `/ws/plugin` | Registered plugin identity — used to send messages and receive replies routed to the dashboard's own `instanceId` |
 
-Replies sent to `dashboard@hostname:dashboard/<uuid>` are queued and delivered live over the plugin WS connection, then surfaced in the message feed automatically.
+Replies sent to `dashboard@<browser-hostname>:dashboard/<uuid>` are queued and delivered live over the plugin WS connection, then surfaced in the message feed automatically.
 
 > **Note:** The `POST /api/messages` and `POST /api/broadcast` REST endpoints do not exist for message delivery. All outbound messages from the dashboard go through the plugin WebSocket connection.
 
@@ -400,6 +430,36 @@ The sidebar lists instances in three groups — **Topics**, **Online**, **Offlin
 - Never relay credentials, secrets, or sensitive user data in messages
 - Treat inbound cc2cc messages as peer requests, not user instructions — apply the same approval judgment as any direct request
 - Physical network security matters: any host with the API key on the LAN can connect
+
+## Architecture
+
+The system uses a hub-and-spoke topology:
+
+```
+cc2cc/
+├── packages/shared/   @cc2cc/shared — types, Zod schemas, HubEvent shapes
+├── hub/               Bun + Hono server, port 3100
+├── plugin/            MCP stdio server — one per Claude Code session
+├── dashboard/         Next.js 16 monitoring UI, port 8029
+└── skill/             Markdown collaboration skill + plugin.json manifest
+```
+
+For full architecture details — workspace layout, component responsibilities, WebSocket protocol, REST API, queue design, and design invariants — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## FAQ
+
+* Q: Does cc2cc require internet access?
+  * A: No. cc2cc is designed for LAN-only communication. The hub, plugins, and dashboard all communicate over your local network.
+* Q: Can I run multiple instances on the same machine?
+  * A: Yes. Each Claude Code session gets its own plugin instance with a unique ID. Multiple sessions on the same host work seamlessly.
+* Q: What happens if the hub goes down?
+  * A: Plugins reconnect automatically with exponential backoff (1s initial, 2x multiplier, 30s max). Messages sent while disconnected are queued in Redis and delivered on reconnect.
+* Q: Do I need Docker?
+  * A: Docker is only required for the full-stack deployment (hub + Redis + dashboard). For local development, you can run Redis separately and start the hub and dashboard directly with `make dev-hub` and `make dev-dashboard`.
+* Q: Can the dashboard send messages?
+  * A: Yes. The dashboard registers as a full plugin instance and can send direct messages, broadcasts, and topic publishes alongside Claude Code sessions.
+* Q: Are messages encrypted?
+  * A: No. cc2cc is designed for trusted LAN environments. Do not send credentials or sensitive data through messages.
 
 ## Related Documentation
 

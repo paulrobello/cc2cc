@@ -89,9 +89,9 @@ No build step — all other workspaces import directly from TypeScript source vi
 
 | Module | Contents |
 |--------|----------|
-| `types.ts` | `MessageType` enum, `Message` interface, `InstanceInfo` interface (with optional `role` field), `TopicInfo` interface |
-| `schema.ts` | Zod schemas for all message shapes and MCP tool inputs; uses `z.nativeEnum(MessageType)` for enum alignment |
-| `events.ts` | `HubEvent` discriminated union — all event types emitted to dashboard clients, including topic and role events |
+| `src/types.ts` | `MessageType` enum, `Message` interface, `InstanceInfo` interface (with optional `role` field), `TopicInfo` interface |
+| `src/schema.ts` | Zod schemas for all message shapes and MCP tool inputs; uses `z.nativeEnum(MessageType)` for enum alignment |
+| `src/events.ts` | `HubEvent` discriminated union — all event types emitted to dashboard clients, including topic and role events |
 
 > **Note:** Zod version is pinned to `^3`. Do not upgrade to v4 — it is incompatible with the shared schemas.
 
@@ -103,14 +103,15 @@ No build step — all other workspaces import directly from TypeScript source vi
 
 | Module | Responsibility |
 |--------|---------------|
+| `index.ts` | Entry point; Bun + Hono server setup, WS upgrade routing for `/ws/plugin` and `/ws/dashboard`, CORS |
 | `config.ts` | Environment: `CC2CC_HUB_PORT` (3100), `CC2CC_HUB_API_KEY` (required), `CC2CC_REDIS_URL` |
-| `registry.ts` | In-memory `Map` of live connections + Redis presence TTLs (24 h) |
-| `queue.ts` | RPOPLPUSH-based at-least-once delivery; max 1000 msgs/queue; daily stats counter (`stats:messages:today`) with EXPIREAT midnight UTC |
+| `registry.ts` | In-memory `Map` of live connections + Redis presence TTLs (24 h); partial address resolution |
+| `queue.ts` | RPOPLPUSH-based at-least-once delivery; max 1000 msgs/queue; daily stats counter (`stats:messages:today`) with EXPIREAT midnight UTC; queue migration for session updates |
 | `broadcast.ts` | `BroadcastManager`: in-memory fan-out + per-instance 5 s rate limiter |
 | `topic-manager.ts` | Pub/sub topic lifecycle (create, delete, subscribe, unsubscribe, publish); persistent topic messages queued to offline subscribers; project topic auto-joined on connect |
-| `ws-handler.ts` | Plugin/dashboard WS lifecycle; message routing; emits `HubEvent` to `dashboardClients` set |
+| `ws-handler.ts` | Plugin/dashboard WS lifecycle; message routing; emits `HubEvent` to `dashboardClients` set; handles 8 WS actions |
 | `api.ts` | REST handlers; `GET /health` is the only unauthenticated endpoint; all others require `?key=` |
-| `redis.ts` | Redis client setup and health check helper |
+| `redis.ts` | Redis client setup (ioredis) and health check helper |
 | `validation.ts` | Shared validation constants (e.g. `INSTANCE_ID_RE`) |
 
 ---
@@ -124,7 +125,7 @@ No build step — all other workspaces import directly from TypeScript source vi
 | `config.ts` | Assembles `instanceId` from env vars; reads Claude session ID from `.claude/.cc2cc-session-id` (written by `SessionStart` hook), falling back to random UUIDv4 |
 | `connection.ts` | `HubConnection`: WS client using the `ws` package; exponential backoff (1 s → ×2 → 30 s max); `request()` method with 10 s timeout |
 | `channel.ts` | Converts hub `message:sent` events into `notifications/claude/channel` MCP notifications with `source: "cc2cc"` in meta |
-| `tools.ts` | Ten MCP tools — `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic` |
+| `tools.ts` | Ten MCP tools — `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic`. **Note:** The `ping` tool calls `GET /api/ping/:id` which is not yet implemented on the hub; it will return 404 |
 
 **Instance ID format:**
 
@@ -170,13 +171,16 @@ dashboard@<hostname>:dashboard/<uuid>
 
 The UUID is generated once per browser session (stored in `sessionStorage`) and is stable across page re-renders but fresh on each new tab.
 
+`sendMessage` and `sendBroadcast` go through the plugin WS connection. `sendPublishTopic` goes through REST (`POST /api/topics/:name/publish`) to avoid requiring the dashboard's plugin WS identity for topic operations.
+
 | Module | Responsibility |
 |--------|---------------|
-| `WsProvider` | Single context providing both WS connections; accumulates `instances` Map, `feed[]` (capped at 500), counters; dispatches all `HubEvent` types |
-| `app/page.tsx` | Command Center: instance sidebar + live message feed + manual send bar |
+| `WsProvider` | Single context providing both WS connections; accumulates `instances` Map, `topics` Map, `feed[]` (capped at 500), counters; dispatches all `HubEvent` types |
+| `app/page.tsx` | Command Center: stats bar, instance sidebar, feed filter bar, live message feed, manual send bar |
+| `app/topics/page.tsx` | Topics management: topic list + create/delete, subscriber list + subscribe/unsubscribe, publish panel |
 | `app/analytics/page.tsx` | Stats bar + activity timeline |
 | `app/conversations/page.tsx` | Thread-grouped conversation view + message inspector |
-| `lib/api.ts` | Typed fetch wrappers for hub REST; `AbortSignal.timeout(10 000)` on all calls |
+| `lib/api.ts` | Typed fetch wrappers for hub REST; `AbortSignal.timeout(10_000)` on all calls; topic wrappers: `fetchTopics`, `createTopic`, `deleteTopic`, `subscribeToTopic`, `unsubscribeFromTopic` |
 
 ---
 
@@ -188,7 +192,8 @@ Install via: `claude plugin add ./skill`
 
 The skill includes:
 - `skills/cc2cc/SKILL.md` — collaboration protocol documentation loaded into Claude Code context
-- `.claude-plugin/plugin.json` — MCP server manifest pointing to the `plugin/` server
+- `.claude-plugin/plugin.json` — plugin manifest with metadata, required/optional env vars
+- `.mcp.json` — MCP server definition pointing to `plugin/src/index.ts`
 - `skills/cc2cc/patterns/` — reusable patterns: task delegation, broadcast, result aggregation, and topics
 - `hooks/` — `SessionStart` hook that writes the Claude session ID to `.claude/.cc2cc-session-id` for stable instance identity
 
@@ -208,20 +213,18 @@ sequenceDiagram
 
     PA->>HUB: WS action: send_message {to: B, type: task, content}
     HUB->>REDIS: RPUSH queue:B message
-    HUB-->>PA: WS ack {messageId, queued: true}
     HUB-->>DB: HubEvent message:sent (fan-out to all dashboard clients)
 
     alt Plugin B is online
-        HUB->>PB: notifications/claude/channel (live delivery)
-        PB-->>HUB: ack delivery
-        HUB->>REDIS: LREM processing:B message
+        HUB->>PB: WS send (live delivery alongside queue)
+        HUB-->>PA: WS ack {messageId, queued: false}
     else Plugin B is offline — message waits in Redis
+        HUB-->>PA: WS ack {messageId, queued: true}
         Note over REDIS: message held in queue:B
         Note over PB,HUB: Plugin B reconnects
         HUB->>REDIS: RPOPLPUSH queue:B processing:B
         REDIS-->>HUB: message
-        HUB->>PB: notifications/claude/channel (flushed on reconnect)
-        PB-->>HUB: ack delivery
+        HUB->>PB: WS send (flushed on reconnect)
         HUB->>REDIS: LREM processing:B message
     end
 ```
@@ -240,10 +243,10 @@ All frames are JSON objects with an `action` field. Every request frame carries 
 
 | Action | Payload | Ack |
 |--------|---------|-----|
-| `send_message` | `{ to, type, content, replyToMessageId?, metadata?, requestId }` | `{ requestId, messageId, queued }` |
+| `send_message` | `{ to, type, content, replyToMessageId?, metadata?, requestId }` | `{ requestId, messageId, queued, warning? }` |
 | `broadcast` | `{ type, content, metadata?, requestId }` | `{ requestId, delivered }` |
 | `get_messages` | `{ limit?, requestId }` | `{ requestId, messages[] }` |
-| `session_update` | `{ oldInstanceId, newInstanceId, requestId }` | `{ requestId, migrated }` |
+| `session_update` | `{ newInstanceId, requestId }` | `{ requestId, migrated }` |
 | `set_role` | `{ role, requestId }` | `{ requestId, instanceId, role }` |
 | `subscribe_topic` | `{ topic, requestId }` | `{ requestId, topic, subscribed: true }` |
 | `unsubscribe_topic` | `{ topic, requestId }` | `{ requestId, topic, unsubscribed: true }` or `{ requestId, error }` |
@@ -289,7 +292,6 @@ All endpoints require `?key=<CC2CC_HUB_API_KEY>` except `GET /health`.
 | `GET` | `/api/instances` | List all registered instances with status and queue depth |
 | `GET` | `/api/stats` | Current message stats (total today, active instances, queued messages) |
 | `GET` | `/api/messages/:id` | Stub — returns 404; use the WS event stream to build a local message index |
-| `GET` | `/api/ping/:id` | Check liveness of an instance; returns `{ online, latency? }` |
 | `DELETE` | `/api/instances/:id` | Remove an offline instance and flush its queue; returns 409 if instance is online |
 | `DELETE` | `/api/queue/:id` | Flush an instance's Redis queue without removing the registry entry |
 | `GET` | `/api/topics` | List all topics with subscriber counts |
@@ -300,7 +302,7 @@ All endpoints require `?key=<CC2CC_HUB_API_KEY>` except `GET /health`.
 | `POST` | `/api/topics/:name/unsubscribe` | Unsubscribe an instance from a topic |
 | `POST` | `/api/topics/:name/publish` | Publish a message to a topic |
 
-> **Note:** There are no REST endpoints for `send_message` or `broadcast`. All direct message delivery and identity-dependent operations go through the plugin WebSocket connection. The Topics API is available via both REST and WS.
+> **Note:** There are no REST endpoints for `send_message`, `broadcast`, or `ping`. All direct message delivery and identity-dependent operations go through the plugin WebSocket connection. The Topics API is available via both REST and WS.
 
 ---
 
@@ -316,8 +318,8 @@ Each instance has two Redis keys:
 **Delivery flow:**
 
 1. Sender submits `send_message` → hub `RPUSH queue:B message`
-2. If B is online, hub atomically `RPOPLPUSH queue:B processing:B`, delivers over WS
-3. On delivery ack, hub `LREM processing:B message`
+2. If B is online, hub also delivers the message live over WS (message remains in queue)
+3. On reconnect, hub flushes the queue: `RPOPLPUSH queue:B processing:B`, sends over WS, then `LREM processing:B message`
 4. On hub crash/restart, `replayProcessing` moves `processing:B` back to `queue:B`
 
 **Limits:**
@@ -352,7 +354,7 @@ The RPOPLPUSH pattern ensures a message is never lost between "popped from queue
 Messages sent to `to: 'broadcast'` fan out over live WS connections only — not queued. Offline instances will not receive them.
 
 **All message delivery is WebSocket-only.**
-There are no REST endpoints for `send_message` or `broadcast`. The hub's REST API is for metadata (instance list, stats, remove) only.
+There are no REST endpoints for `send_message`, `broadcast`, or `ping`. The hub's REST API is for metadata (instance list, stats, remove), topic management, and topic publishing only.
 
 ---
 
