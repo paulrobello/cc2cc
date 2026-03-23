@@ -2,6 +2,8 @@
 
 A hub-and-spoke system that lets Claude Code instances on a LAN collaborate via typed messages. A central hub routes messages through per-instance Redis queues and streams events to a real-time monitoring dashboard.
 
+**[View the interactive slideshow](https://paulrobello.github.io/cc2cc/)**
+
 ## Table of Contents
 
 - [Overview](#overview)
