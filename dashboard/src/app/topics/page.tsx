@@ -212,10 +212,15 @@ export default function TopicsPage() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {selected.subscribers.map((subId) => {
+              {[...selected.subscribers].sort((a, b) => {
+                const aOnline = instances.get(a)?.status === "online" ? 0 : 1;
+                const bOnline = instances.get(b)?.status === "online" ? 0 : 1;
+                if (aOnline !== bOnline) return aOnline - bOnline;
+                return a.localeCompare(b);
+              }).map((subId) => {
                 const inst = instances.get(subId);
                 return (
-                  <div key={subId} className="flex items-center gap-2 px-3 py-2">
+                  <div key={subId} className="group flex items-center gap-2 px-3 py-2">
                     <span
                       className="w-2 h-2 rounded-full shrink-0"
                       style={{
@@ -224,14 +229,31 @@ export default function TopicsPage() {
                       }}
                     />
                     <span
-                      className="font-mono text-[10px] flex-1 truncate"
+                      className="font-mono text-[10px] truncate"
                       style={{ color: "#6b8aaa" }}
                     >
                       {subId}
                     </span>
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await unsubscribeFromTopic(selectedTopic!, subId);
+                          setError(null);
+                        } catch (err) {
+                          setError((err as Error).message);
+                        }
+                      }}
+                      className="font-mono text-[10px] px-1 rounded shrink-0"
+                      style={{ color: "#f87171" }}
+                      title={`Unsubscribe ${subId}`}
+                    >
+                      ×
+                    </button>
                     {inst?.role && (
                       <span
-                        className="font-mono text-[9px] px-1.5 py-0.5 rounded"
+                        className="font-mono text-[9px] px-1.5 py-0.5 rounded shrink-0"
                         style={{
                           background: "rgba(0,212,255,0.08)",
                           color: "#00d4ff",

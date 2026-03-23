@@ -221,8 +221,10 @@ export function buildApiRoutes(app: Hono): void {
       return c.json({ error: "topic not found" }, 404);
     }
     const { instanceId } = await c.req.json<{ instanceId: string }>();
+    const entry = registry.get(instanceId);
+    const isOffline = !entry || entry.status !== "online";
     try {
-      await topicManager.unsubscribe(name, instanceId);
+      await topicManager.unsubscribe(name, instanceId, isOffline);
       emitToDashboards({
         event: "topic:unsubscribed",
         name,

@@ -45,8 +45,8 @@ export const topicManager = {
     await redis.sadd(`instance:${instanceId}:topics`, name);
   },
 
-  async unsubscribe(name: string, instanceId: string): Promise<void> {
-    if (name === parseProject(instanceId)) {
+  async unsubscribe(name: string, instanceId: string, force = false): Promise<void> {
+    if (!force && name === parseProject(instanceId)) {
       throw new Error("cannot unsubscribe from auto-joined project topic");
     }
     await redis.srem(`topic:${name}:subscribers`, instanceId);

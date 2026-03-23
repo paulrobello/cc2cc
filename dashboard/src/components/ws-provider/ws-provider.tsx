@@ -127,10 +127,25 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
     const res = await fetch(`${hubHttpUrl}/api/topics?key=${encodeURIComponent(apiKey)}`);
     if (!res.ok || !mountedRef.current) return;
     const list = await res.json() as TopicInfo[];
+    // Fetch subscribers for each topic in parallel
+    const subsResults = await Promise.all(
+      list.map(async (t) => {
+        try {
+          const subRes = await fetch(
+            `${hubHttpUrl}/api/topics/${encodeURIComponent(t.name)}/subscribers?key=${encodeURIComponent(apiKey)}`,
+          );
+          if (subRes.ok) return await subRes.json() as string[];
+        } catch { /* ignore */ }
+        return [] as string[];
+      }),
+    );
+    if (!mountedRef.current) return;
     setTopics((prev) => {
       const next = new Map(prev);
-      for (const t of list) {
-        if (!next.has(t.name)) next.set(t.name, { ...t, subscribers: [] });
+      for (let i = 0; i < list.length; i++) {
+        const t = list[i];
+        const subs = subsResults[i];
+        next.set(t.name, { ...t, subscribers: subs });
       }
       return next;
     });

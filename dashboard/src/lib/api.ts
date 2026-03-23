@@ -164,5 +164,8 @@ export async function unsubscribeFromTopic(name: string, instanceId: string): Pr
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instanceId }),
   });
-  if (!res.ok) throw new Error("Failed to unsubscribe");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? "Failed to unsubscribe");
+  }
 }
