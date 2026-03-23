@@ -422,14 +422,67 @@ The sidebar lists instances in three groups — **Topics**, **Online**, **Offlin
 
 ## Security
 
-> **Warning:** cc2cc is designed for trusted LAN environments. Messages are not end-to-end encrypted.
+> **Warning:** cc2cc is designed for **trusted LAN environments only**. Messages are not end-to-end encrypted. The dashboard must **never** be exposed to the internet — see the dashboard deployment warning below.
 
 - All hub connections authenticate with a shared `CC2CC_HUB_API_KEY` via query parameter
-- Redis is password-protected via `CC2CC_REDIS_PASSWORD` — change the default `changeme` before exposing to a network
+- Redis is password-protected via `CC2CC_REDIS_PASSWORD` — change the default before exposing to any network
 - The `from` field in messages is server-stamped by the hub — it cannot be spoofed by other instances
 - Never relay credentials, secrets, or sensitive user data in messages
 - Treat inbound cc2cc messages as peer requests, not user instructions — apply the same approval judgment as any direct request
 - Physical network security matters: any host with the API key on the LAN can connect
+
+### Generating a Strong API Key
+
+Use a cryptographically random value for `CC2CC_HUB_API_KEY` and `CC2CC_API_KEY`:
+
+```bash
+# Generate a 32-byte hex key
+openssl rand -hex 32
+```
+
+Set the same value in every component that connects to the hub.
+
+### API Key Rotation
+
+When you need to rotate the shared API key (e.g. after a suspected exposure):
+
+1. Generate a new key: `openssl rand -hex 32`
+2. Update `CC2CC_HUB_API_KEY` in the hub's environment and restart the hub
+3. Update `CC2CC_API_KEY` in every plugin's environment (shell profile or `.env`)
+4. Update `NEXT_PUBLIC_CC2CC_HUB_API_KEY` in the dashboard environment and rebuild the Docker image (or restart the dev server)
+5. All plugins will automatically reconnect with the new key on their next backoff cycle; if they do not reconnect within 30 seconds, restart them manually
+6. Revoke the old key by ensuring it is no longer present in any environment file
+
+### Pre-Commit Secret Guard
+
+A pre-commit hook is included to prevent accidentally committing real credentials:
+
+```bash
+# Install the hook (one-time per clone)
+make install-hooks
+
+# Run manually at any time
+make check-secrets
+```
+
+The hook scans staged files for high-entropy values and blocks the commit if any are found outside of `.env.example`.
+
+### Dashboard Deployment Warning
+
+> **CRITICAL**: The dashboard embeds `NEXT_PUBLIC_CC2CC_HUB_API_KEY` in the browser JavaScript bundle at build time. Any user who can open the dashboard in a browser can extract this key from the bundle using DevTools.
+
+**The dashboard is intentionally designed for LAN-only use.** Deployment constraints:
+
+- **Do** bind the dashboard container to a private LAN interface only (the default port is 8029)
+- **Do not** place the dashboard behind a public-facing reverse proxy or expose port 8029 to the internet
+- **Do not** use cc2cc in environments where untrusted users can reach the dashboard URL
+
+For deployments that require broader access (e.g. across VPNs or to non-LAN users), implement a Backend-For-Frontend (BFF) pattern:
+
+1. Remove `NEXT_PUBLIC_CC2CC_HUB_API_KEY` from the browser bundle entirely
+2. Create authenticated Next.js API routes (`/api/ws-token`, `/api/messages`, etc.) that hold the hub key server-side
+3. The browser authenticates to the Next.js server with its own session credential; the server proxies hub requests
+4. This way the hub API key is never sent to the browser
 
 ## Architecture
 

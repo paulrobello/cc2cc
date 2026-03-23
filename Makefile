@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt typecheck checkall dev-redis dev-hub dev-dashboard docker-up docker-down docker-dev-up docker-dev-down
+.PHONY: build test lint fmt typecheck checkall dev-redis dev-hub dev-dashboard docker-up docker-down docker-dev-up docker-dev-down install-hooks check-secrets
 
 # ── Build ────────────────────────────────────────────────────────────────────
 build:
@@ -18,6 +18,15 @@ typecheck:
 	bun run --workspaces typecheck
 
 checkall: fmt lint typecheck test
+
+# ── Security ─────────────────────────────────────────────────────────────────
+install-hooks:
+	cp scripts/check-secrets.sh .git/hooks/pre-commit
+	chmod +x .git/hooks/pre-commit
+	@echo "Pre-commit hook installed. Run 'make check-secrets' to test it."
+
+check-secrets:
+	@bash scripts/check-secrets.sh
 
 # ── Dev ──────────────────────────────────────────────────────────────────────
 dev-redis:

@@ -1,4 +1,22 @@
 # dashboard/Dockerfile
+#
+# SECURITY WARNING — LAN-ONLY DEPLOYMENT
+# ─────────────────────────────────────────────────────────────────────────────
+# NEXT_PUBLIC_CC2CC_HUB_API_KEY is baked into the static JavaScript bundle at
+# build time by the ARG/ENV directives below. Any user who can open this
+# dashboard in a browser can extract the hub API key from the bundle.
+#
+# This image MUST only be deployed on a trusted private LAN. NEVER:
+#   - expose port 8029 to the internet
+#   - place this container behind a public-facing reverse proxy
+#   - deploy to cloud environments accessible by untrusted users
+#
+# For internet-facing deployments, implement a BFF (Backend-For-Frontend)
+# pattern: remove NEXT_PUBLIC_CC2CC_HUB_API_KEY from the build args and proxy
+# all hub requests through authenticated Next.js API routes that hold the key
+# server-side. See README.md § Security > Dashboard Deployment Warning.
+# ─────────────────────────────────────────────────────────────────────────────
+#
 # ── Stage 1: dependencies ──────────────────────────────────────────────────────
 FROM oven/bun:1-alpine AS deps
 WORKDIR /app
