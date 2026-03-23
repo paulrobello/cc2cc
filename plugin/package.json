@@ -20,7 +20,7 @@
     "@cc2cc/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "ws": "^8.20.0",
-    "zod": "^3"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
