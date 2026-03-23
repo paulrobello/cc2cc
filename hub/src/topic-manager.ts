@@ -1,5 +1,4 @@
 // hub/src/topic-manager.ts
-import { randomUUID } from "node:crypto";
 import type { Message, TopicInfo } from "@cc2cc/shared";
 import { redis } from "./redis.js";
 import { pushMessage } from "./queue.js";

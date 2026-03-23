@@ -34,6 +34,7 @@ export function ActivityTimeline({
   // Track wall-clock "now" with a stable ref updated by a 5-second interval.
   // Using a ref + state pair avoids stale Date.now() captures inside useMemo:
   // the state tick forces a re-render, and the ref always has the latest value.
+  // eslint-disable-next-line react-hooks/purity -- Date.now() in useRef is safe: the initial value is only evaluated once
   const nowMsRef = useRef(Date.now());
   const [, setTick] = useState(0);
   useEffect(() => {

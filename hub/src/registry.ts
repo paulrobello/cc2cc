@@ -117,7 +117,7 @@ export const registry = {
    * starts with `partial + "/"`.
    */
   resolvePartial(partial: string): { instanceId: string; warning?: string } | { error: string } {
-    const prefix = partial + "/";
+    const prefix = `${partial}/`;
     const allMatches = Array.from(_map.values()).filter((e) => e.instanceId.startsWith(prefix));
     const onlineMatches = allMatches.filter((e) => e.status === "online");
 

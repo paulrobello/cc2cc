@@ -1,6 +1,6 @@
 // hub/src/api.ts
 import { randomUUID } from "node:crypto";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { config } from "./config.js";
 import { registry } from "./registry.js";
 import { getMessagesTodayCount, getTotalQueued, flushQueue } from "./queue.js";
@@ -32,8 +32,7 @@ export function validateKey(key: string | undefined): Response | null {
  * Extract the API key from Authorization header (preferred) or ?key= query param (fallback).
  * Call this in each route handler instead of c.req.query("key") directly.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getKey(c: any): string | undefined {
+function getKey(c: Context): string | undefined {
   const authHeader = c.req.header("Authorization") as string | undefined;
   if (authHeader?.startsWith("Bearer ")) {
     return authHeader.slice(7);
