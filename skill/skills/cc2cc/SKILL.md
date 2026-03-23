@@ -155,7 +155,7 @@ or when explicitly catching up after a long offline period.
 
 Checks whether a specific instance is reachable.
 
-**Returns:** `{ online: boolean, latency?: number }`
+**Returns:** `{ online: boolean, instanceId: string }`
 
 Use before sending a time-sensitive task to confirm the target is responsive.
 Not required for every send — only when latency or availability matters.

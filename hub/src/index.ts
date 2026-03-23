@@ -16,6 +16,8 @@ import {
 } from "./ws-handler.js";
 import type { WsData } from "./ws-handler.js";
 import type { ServerWebSocket } from "bun";
+import { redis } from "./redis.js";
+import { replayProcessing } from "./queue.js";
 
 const app = new Hono();
 
@@ -101,3 +103,32 @@ const server = Bun.serve<WsData>({
 });
 
 console.log(`[hub] listening on port ${config.port}`);
+
+// On startup: scan for any processing:* keys left over from a previous hub
+// crash or unclean shutdown and replay them back into their queues so
+// at-least-once delivery holds across restarts.
+(async () => {
+  try {
+    // Use SCAN (not KEYS) to avoid blocking the Redis event loop on large keyspaces.
+    let cursor = "0";
+    let total = 0;
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, "MATCH", "processing:*", "COUNT", 100);
+      cursor = nextCursor;
+      for (const key of keys) {
+        // Strip the "processing:" prefix to recover the instanceId.
+        const instanceId = key.slice("processing:".length);
+        const replayed = await replayProcessing(instanceId);
+        if (replayed > 0) {
+          console.log(`[hub] startup: replayed ${replayed} message(s) for ${instanceId}`);
+          total += replayed;
+        }
+      }
+    } while (cursor !== "0");
+    if (total > 0) {
+      console.log(`[hub] startup: replayed ${total} total in-flight message(s) from processing keys`);
+    }
+  } catch (err) {
+    console.error("[hub] startup: replayProcessing scan failed", (err as Error).message);
+  }
+})();

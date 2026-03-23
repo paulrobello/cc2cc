@@ -88,7 +88,10 @@ The fastest way to run the full stack (hub + Redis + dashboard):
 ```bash
 # 1. Copy and edit the env file
 cp .env.example .env
-# Set CC2CC_HUB_API_KEY, CC2CC_REDIS_PASSWORD, and CC2CC_HOST_LAN_IP at minimum
+# Set CC2CC_HUB_API_KEY, CC2CC_REDIS_PASSWORD, and CC2CC_HOST_LAN_IP at minimum.
+# For Docker: set CC2CC_REDIS_URL=redis://:your-redis-password-here@redis:6379
+#   (the hostname is 'redis', the Docker Compose service name — not 'localhost').
+# For local dev without Docker: use redis://:your-redis-password-here@localhost:6379
 
 # 2. Start all services
 make docker-up
@@ -309,9 +312,7 @@ Destructive pull — pops up to `limit` messages (default: 10, max: 100) from yo
 
 Checks whether an instance is reachable. Calls `GET /api/ping/<instanceId>` on the hub.
 
-> **Note:** The hub does not currently implement this REST endpoint. The tool exists in the plugin but calls will fail at runtime until the endpoint is added.
-
-**Returns:** `{ online: boolean, latency?: number }`
+**Returns:** `{ online: boolean, instanceId: string }`
 
 ### `set_role(role)`
 

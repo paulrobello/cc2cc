@@ -98,6 +98,18 @@ export function buildApiRoutes(app: Hono): void {
     );
   });
 
+  // GET /api/ping/:id — check whether an instance is currently online
+  app.get("/api/ping/:id", (c) => {
+    const authErr = validateKey(c.req.query("key"));
+    if (authErr) return authErr;
+
+    const instanceId = decodeURIComponent(c.req.param("id"));
+    const entry = registry.get(instanceId);
+    const online = entry?.status === "online";
+
+    return c.json({ online, instanceId });
+  });
+
   // DELETE /api/instances/:id — remove a stale offline instance from the registry
   app.delete("/api/instances/:id", async (c) => {
     const authErr = validateKey(c.req.query("key"));
