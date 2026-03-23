@@ -18,23 +18,14 @@ import type {
   WsContextValue,
 } from "@/types/dashboard";
 import { fetchInstances, fetchTopics, fetchTopicSubscribers } from "@/lib/api";
+import { useReconnectingWs } from "@/hooks/use-reconnecting-ws";
+import { usePluginWs } from "@/hooks/use-plugin-ws";
 
 /** Maximum number of messages retained in the feed */
 const MAX_FEED_SIZE = 500;
 
-/** Exponential backoff config */
-const BACKOFF_INITIAL_MS = 1_000;
-const BACKOFF_MULTIPLIER = 2;
-const BACKOFF_MAX_MS = 30_000;
 /** Number of consecutive failures before showing "disconnected" (still retries in background) */
 const DISCONNECT_THRESHOLD = 3;
-
-/** Request/response entry for plugin WS pending calls */
-interface PendingRequest {
-  resolve: (value: unknown) => void;
-  reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
 
 /** Generate (or restore) the dashboard's registered instance ID for this browser session. */
 function initDashboardInstanceId(): string {
@@ -80,28 +71,17 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
     errors: 0,
     pendingTaskIds: new Set(),
   });
-
   const [topics, setTopics] = useState<Map<string, TopicState>>(new Map());
 
   // Stable dashboard identity — lazy initializer runs once per mount
   const [dashboardInstanceId] = useState(() => initDashboardInstanceId());
 
-  // ── Dashboard WS state (receive-only hub event stream) ─────────────────────
-  const wsRef = useRef<WebSocket | null>(null);
-  const failureCountRef = useRef(0);
-  const backoffMsRef = useRef(BACKOFF_INITIAL_MS);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
-  const connectRef = useRef<() => void>(() => {});
+  // Tracks consecutive dashboard WS failures for the disconnect threshold
+  const failureCountRef = useRef(0);
 
-  // ── Plugin WS state (send/receive as registered instance) ──────────────────
-  const pluginWsRef = useRef<WebSocket | null>(null);
-  const pluginBackoffMsRef = useRef(BACKOFF_INITIAL_MS);
-  const pluginReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pluginPendingRef = useRef<Map<string, PendingRequest>>(new Map());
-  const pluginConnectRef = useRef<() => void>(() => {});
+  // ── Seed from REST on first load ────────────────────────────────────────────
 
-  /** Seed instances from REST on first load */
   const seedInstances = useCallback(async () => {
     const list = await fetchInstances();
     if (!mountedRef.current) return;
@@ -127,8 +107,9 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
       return; // hub unreachable — degrade gracefully
     }
     if (!mountedRef.current) return;
-    // Fetch subscribers for each topic in parallel using the api helper
-    const subsResults = await Promise.all(list.map((t) => fetchTopicSubscribers(t.name)));
+    const subsResults = await Promise.all(
+      list.map((t) => fetchTopicSubscribers(t.name)),
+    );
     if (!mountedRef.current) return;
     setTopics((prev) => {
       const next = new Map(prev);
@@ -261,7 +242,8 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
           setInstances((prev) => {
             const next = new Map(prev);
             const existing = next.get(evt.instanceId);
-            if (existing) next.set(evt.instanceId, { ...existing, role: evt.role });
+            if (existing)
+              next.set(evt.instanceId, { ...existing, role: evt.role });
             return next;
           });
           break;
@@ -270,7 +252,13 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
           setTopics((prev) => {
             const next = new Map(prev);
             if (!next.has(evt.name)) {
-              next.set(evt.name, { name: evt.name, createdAt: evt.timestamp, createdBy: evt.createdBy, subscriberCount: 0, subscribers: [] });
+              next.set(evt.name, {
+                name: evt.name,
+                createdAt: evt.timestamp,
+                createdBy: evt.createdBy,
+                subscriberCount: 0,
+                subscribers: [],
+              });
             }
             return next;
           });
@@ -289,7 +277,11 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             const next = new Map(prev);
             const t = next.get(evt.name);
             if (t && !t.subscribers.includes(evt.instanceId)) {
-              next.set(evt.name, { ...t, subscriberCount: t.subscriberCount + 1, subscribers: [...t.subscribers, evt.instanceId] });
+              next.set(evt.name, {
+                ...t,
+                subscriberCount: t.subscriberCount + 1,
+                subscribers: [...t.subscribers, evt.instanceId],
+              });
             }
             return next;
           });
@@ -300,7 +292,13 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             const next = new Map(prev);
             const t = next.get(evt.name);
             if (t) {
-              next.set(evt.name, { ...t, subscriberCount: Math.max(0, t.subscriberCount - 1), subscribers: t.subscribers.filter((id) => id !== evt.instanceId) });
+              next.set(evt.name, {
+                ...t,
+                subscriberCount: Math.max(0, t.subscriberCount - 1),
+                subscribers: t.subscribers.filter(
+                  (id) => id !== evt.instanceId,
+                ),
+              });
             }
             return next;
           });
@@ -324,158 +322,64 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
           break;
 
         case "topic:message":
-          appendFeed({ message: evt.message, receivedAt: new Date(), isBroadcast: false, topicName: evt.name });
+          appendFeed({
+            message: evt.message,
+            receivedAt: new Date(),
+            isBroadcast: false,
+            topicName: evt.name,
+          });
           break;
       }
     },
     [appendFeed],
   );
 
-  // ── Dashboard WS connect ────────────────────────────────────────────────────
+  // ── Dashboard WS (receive-only hub event stream) ────────────────────────────
 
-  const connect = useCallback(() => {
-    if (!mountedRef.current) return;
-
-    const wsUrl = `${process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100"}/ws/dashboard?key=${encodeURIComponent(process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "")}`;
-
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      if (!mountedRef.current) return;
-      failureCountRef.current = 0;
-      backoffMsRef.current = BACKOFF_INITIAL_MS;
-      setConnectionState("online");
-    };
-
-    ws.onmessage = (evt: MessageEvent<string>) => {
-      handleEvent(evt.data);
-    };
-
-    ws.onerror = () => {
-      setSessionStats((prev) => ({ ...prev, errors: prev.errors + 1 }));
-    };
-
-    ws.onclose = () => {
-      if (!mountedRef.current) return;
-      failureCountRef.current += 1;
-
-      if (failureCountRef.current >= DISCONNECT_THRESHOLD) {
-        setConnectionState("disconnected");
-      } else {
-        setConnectionState("reconnecting");
-      }
-
-      reconnectTimerRef.current = setTimeout(() => {
-        backoffMsRef.current = Math.min(
-          backoffMsRef.current * BACKOFF_MULTIPLIER,
-          BACKOFF_MAX_MS,
-        );
-        connectRef.current();
-      }, backoffMsRef.current);
-    };
-  }, [handleEvent]);
-
-  useEffect(() => {
-    connectRef.current = connect;
-  }, [connect]);
-
-  // ── Plugin WS: request/response helpers ────────────────────────────────────
-
-  /** Send a request over the plugin WS and await the matching ack. */
-  const pluginRequest = useCallback(
-    <T,>(action: string, payload: Record<string, unknown>): Promise<T> => {
-      return new Promise<T>((resolve, reject) => {
-        const ws = pluginWsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          reject(new Error("Plugin WebSocket not connected"));
-          return;
-        }
-        const requestId = crypto.randomUUID();
-        const timer = setTimeout(() => {
-          pluginPendingRef.current.delete(requestId);
-          reject(new Error(`request timeout: action=${action}`));
-        }, 10_000);
-        pluginPendingRef.current.set(requestId, {
-          resolve: resolve as (v: unknown) => void,
-          reject,
-          timer,
-        });
-        ws.send(JSON.stringify({ action, requestId, ...payload }));
-      });
-    },
+  const getDashboardUrl = useCallback(
+    () =>
+      `${process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100"}/ws/dashboard?key=${encodeURIComponent(process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "")}`,
     [],
   );
 
-  // ── Plugin WS connect ───────────────────────────────────────────────────────
-
-  const connectPlugin = useCallback(() => {
-    if (!mountedRef.current) return;
-
-    const pluginWsUrl = `${process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100"}/ws/plugin?key=${encodeURIComponent(process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "")}&instanceId=${encodeURIComponent(dashboardInstanceId)}`;
-
-    const ws = new WebSocket(pluginWsUrl);
-    pluginWsRef.current = ws;
-
-    ws.onopen = () => {
-      if (!mountedRef.current) return;
-      pluginBackoffMsRef.current = BACKOFF_INITIAL_MS;
-    };
-
-    ws.onmessage = (evt: MessageEvent<string>) => {
-      let frame: Record<string, unknown>;
-      try {
-        frame = JSON.parse(evt.data) as Record<string, unknown>;
-      } catch {
-        return;
-      }
-
-      if (frame.action === "subscriptions:sync") {
-        // Dashboard's own subscriptions — already seeded from REST; no additional state needed
-        return;
-      }
-
-      // Route to pending request if this is an ack frame
-      const requestId = frame.requestId as string | undefined;
-      if (requestId) {
-        const pending = pluginPendingRef.current.get(requestId);
-        if (pending) {
-          clearTimeout(pending.timer);
-          pluginPendingRef.current.delete(requestId);
-          if (frame.error) {
-            pending.reject(new Error(frame.error as string));
-          } else {
-            pending.resolve(frame);
-          }
-          return;
+  const {
+    connect: connectDashboard,
+    destroy: destroyDashboard,
+  } = useReconnectingWs(
+    getDashboardUrl,
+    {
+      onOpen: () => {
+        failureCountRef.current = 0;
+        setConnectionState("online");
+      },
+      onMessage: handleEvent,
+      onError: () =>
+        setSessionStats((prev) => ({ ...prev, errors: prev.errors + 1 })),
+      onClose: () => {
+        failureCountRef.current += 1;
+        if (failureCountRef.current >= DISCONNECT_THRESHOLD) {
+          setConnectionState("disconnected");
+        } else {
+          setConnectionState("reconnecting");
         }
-      }
-      // Non-ack frames are queue-flushed inbound messages — already visible in
-      // the feed via the dashboard WS message:sent events, so no extra handling needed.
-    };
+      },
+    },
+    mountedRef,
+  );
 
-    ws.onclose = () => {
-      if (!mountedRef.current) return;
-      // Reject all in-flight requests
-      for (const pending of pluginPendingRef.current.values()) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error("Plugin WebSocket closed"));
-      }
-      pluginPendingRef.current.clear();
+  // ── Plugin WS (registered instance for send operations) ────────────────────
 
-      pluginReconnectTimerRef.current = setTimeout(() => {
-        pluginBackoffMsRef.current = Math.min(
-          pluginBackoffMsRef.current * BACKOFF_MULTIPLIER,
-          BACKOFF_MAX_MS,
-        );
-        pluginConnectRef.current();
-      }, pluginBackoffMsRef.current);
-    };
-  }, [dashboardInstanceId]);
+  const getPluginUrl = useCallback(
+    () =>
+      `${process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100"}/ws/plugin?key=${encodeURIComponent(process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "")}&instanceId=${encodeURIComponent(dashboardInstanceId)}`,
+    [dashboardInstanceId],
+  );
 
-  useEffect(() => {
-    pluginConnectRef.current = connectPlugin;
-  }, [connectPlugin]);
+  const {
+    connect: connectPlugin,
+    destroy: destroyPlugin,
+    request: pluginRequest,
+  } = usePluginWs(getPluginUrl, mountedRef);
 
   // ── Public send API ─────────────────────────────────────────────────────────
 
@@ -492,19 +396,34 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   );
 
   const sendPublishTopic = useCallback(
-    (topic: string, type: MessageType, content: string, persistent: boolean, metadata?: Record<string, unknown>): Promise<void> => {
-      const hubHttpUrl = (process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100")
-        .replace(/^wss?:\/\//, (m) => (m === "wss://" ? "https://" : "http://"));
+    (
+      topic: string,
+      type: MessageType,
+      content: string,
+      persistent: boolean,
+      metadata?: Record<string, unknown>,
+    ): Promise<void> => {
+      const hubHttpUrl = (
+        process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100"
+      ).replace(/^wss?:\/\//, (m) => (m === "wss://" ? "https://" : "http://"));
       const apiKey = process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "";
       return fetch(
         `${hubHttpUrl}/api/topics/${encodeURIComponent(topic)}/publish?key=${encodeURIComponent(apiKey)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, type, persistent, metadata, from: dashboardInstanceId }),
+          body: JSON.stringify({
+            content,
+            type,
+            persistent,
+            metadata,
+            from: dashboardInstanceId,
+          }),
           signal: AbortSignal.timeout(10_000),
         },
-      ).then((r) => { if (!r.ok) throw new Error(`publish failed: ${r.status}`); });
+      ).then((r) => {
+        if (!r.ok) throw new Error(`publish failed: ${r.status}`);
+      });
     },
     [dashboardInstanceId],
   );
@@ -516,19 +435,24 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
     // seedInstances and seedTopics are async — setState fires after promise resolves, guarded by mountedRef.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     seedInstances();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     seedTopics();
-    connect();
+    connectDashboard();
     connectPlugin();
 
     return () => {
       mountedRef.current = false;
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      if (pluginReconnectTimerRef.current)
-        clearTimeout(pluginReconnectTimerRef.current);
-      wsRef.current?.close();
-      pluginWsRef.current?.close();
+      destroyDashboard();
+      destroyPlugin();
     };
-  }, [connect, connectPlugin, seedInstances, seedTopics]);
+  }, [
+    connectDashboard,
+    destroyDashboard,
+    connectPlugin,
+    destroyPlugin,
+    seedInstances,
+    seedTopics,
+  ]);
 
   return (
     <WsContext.Provider
