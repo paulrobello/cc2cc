@@ -43,7 +43,7 @@ describe("HubConnection", () => {
 
     try {
       const { HubConnection } = await import("../src/connection.ts");
-      const conn = new HubConnection("ws://127.0.0.1:19001", "test-key");
+      const conn = new HubConnection("ws://127.0.0.1:19001");
 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error("connect timeout")), 3000);
@@ -65,7 +65,7 @@ describe("HubConnection", () => {
 
     try {
       const { HubConnection } = await import("../src/connection.ts");
-      const conn = new HubConnection("ws://127.0.0.1:19002", "test-key");
+      const conn = new HubConnection("ws://127.0.0.1:19002");
       const received: unknown[] = [];
 
       conn.on("message", (data) => received.push(data));
@@ -103,7 +103,7 @@ describe("HubConnection", () => {
 
     const { HubConnection } = await import("../src/connection.ts");
     // Use 50ms initial delay for test speed
-    const conn = new HubConnection("ws://127.0.0.1:19003", "test-key", {
+    const conn = new HubConnection("ws://127.0.0.1:19003", {
       initialDelayMs: 50,
       maxDelayMs: 200,
     });
@@ -142,7 +142,7 @@ describe("HubConnection", () => {
 
     try {
       const { HubConnection } = await import("../src/connection.ts");
-      const conn = new HubConnection("ws://127.0.0.1:19004", "test-key");
+      const conn = new HubConnection("ws://127.0.0.1:19004");
 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error("connect timeout")), 3000);
@@ -166,7 +166,7 @@ describe("HubConnection", () => {
   it("destroy() stops reconnect attempts", async () => {
     const { HubConnection } = await import("../src/connection.ts");
     // Connect to a port with nothing listening
-    const conn = new HubConnection("ws://127.0.0.1:19099", "test-key", {
+    const conn = new HubConnection("ws://127.0.0.1:19099", {
       initialDelayMs: 50,
       maxDelayMs: 100,
     });

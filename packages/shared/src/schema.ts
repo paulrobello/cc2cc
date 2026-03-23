@@ -25,20 +25,40 @@ export const InstanceInfoSchema = z.object({
 	role: z.string().optional(),
 });
 
+/**
+ * Maximum content size for messages: 64 KiB.
+ * Prevents oversized payloads from overwhelming Redis queues and WS frames.
+ */
+const MAX_CONTENT_BYTES = 65536;
+
+/**
+ * Shared metadata schema: limits keys to 32, values must be primitives only,
+ * and total JSON representation must not exceed 4 KiB.
+ */
+const MetadataSchema = z
+	.record(z.union([z.string(), z.number(), z.boolean(), z.null()]))
+	.refine((v) => Object.keys(v).length <= 32, {
+		message: "metadata must have at most 32 keys",
+	})
+	.refine((v) => JSON.stringify(v).length <= 4096, {
+		message: "metadata must not exceed 4096 bytes when serialized",
+	})
+	.optional();
+
 /** Input schema for the send_message MCP tool */
 export const SendMessageInputSchema = z.object({
 	to: z.string().min(1),
 	type: MessageTypeSchema,
-	content: z.string().min(1),
+	content: z.string().min(1).max(MAX_CONTENT_BYTES),
 	replyToMessageId: z.string().uuid().optional(),
-	metadata: z.record(z.unknown()).optional(),
+	metadata: MetadataSchema,
 });
 
 /** Input schema for the broadcast MCP tool */
 export const BroadcastInputSchema = z.object({
 	type: MessageTypeSchema,
-	content: z.string().min(1),
-	metadata: z.record(z.unknown()).optional(),
+	content: z.string().min(1).max(MAX_CONTENT_BYTES),
+	metadata: MetadataSchema,
 });
 
 /** Input schema for the get_messages MCP tool */
@@ -46,10 +66,23 @@ export const GetMessagesInputSchema = z.object({
 	limit: z.number().int().min(1).max(100).default(10),
 });
 
+/**
+ * Instance ID format: username@host:project/session
+ * Allows alphanumeric, dots, underscores, hyphens. Project ≤64 chars, session ≤64 chars.
+ */
+const INSTANCE_ID_PATTERN =
+	/^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]{1,64}\/[a-zA-Z0-9-]{1,64}$/;
+
 /** Schema for the WS action frame the plugin sends to the hub when the session ID changes */
 export const SessionUpdateActionSchema = z.object({
 	action: z.literal("session_update"),
-	newInstanceId: z.string().min(1),
+	newInstanceId: z
+		.string()
+		.min(1)
+		.regex(
+			INSTANCE_ID_PATTERN,
+			"newInstanceId must match format: username@host:project/session (alphanumeric, dots, underscores, hyphens; project and session ≤64 chars)",
+		),
 	requestId: z.string().uuid(),
 });
 
@@ -75,9 +108,9 @@ export const UnsubscribeTopicInputSchema = z.object({
 export const PublishTopicInputSchema = z.object({
 	topic: z.string().min(1),
 	type: MessageTypeSchema,
-	content: z.string().min(1),
+	content: z.string().min(1).max(MAX_CONTENT_BYTES),
 	persistent: z.boolean().default(false),
-	metadata: z.record(z.unknown()).optional(),
+	metadata: MetadataSchema,
 });
 
 // Infer TypeScript types from schemas where needed

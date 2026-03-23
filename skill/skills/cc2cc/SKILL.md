@@ -1,8 +1,14 @@
 ---
 name: cc2cc
 description: Claude-to-Claude collaboration — activate when collaborating with other Claude Code instances, delegating tasks, receiving inbound cc2cc messages, or coordinating via broadcast.
-version: 0.1.0
+version: 0.2.2
 ---
+
+<!--
+  Skill version (above) must match skill/.claude-plugin/plugin.json version.
+  The monorepo package.json uses a separate version for hub/plugin/dashboard releases.
+  See CHANGELOG.md for the version policy explanation.
+-->
 
 # cc2cc — Claude-to-Claude Collaboration Skill
 
@@ -95,7 +101,7 @@ as listed below.
 
 Returns all registered instances — both online and offline — with live status.
 
-**Returns:** `{ instanceId, project, status: 'online'|'offline', connectedAt, queueDepth }[]`
+**Returns:** `{ instanceId, project, status: 'online'|'offline', connectedAt, queueDepth, role?: string }[]`
 
 Use this before sending any direct message to find the right target. Filter by
 `status: 'online'` unless you intentionally want to queue for an offline peer.

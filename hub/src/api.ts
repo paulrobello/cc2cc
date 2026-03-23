@@ -1,28 +1,21 @@
 // hub/src/api.ts
-import { timingSafeEqual, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { Hono } from "hono";
 import { config } from "./config.js";
 import { registry } from "./registry.js";
 import { getMessagesTodayCount, getTotalQueued, flushQueue } from "./queue.js";
 import { checkRedisHealth } from "./redis.js";
 import { emitToDashboards } from "./ws-handler.js";
-import { topicManager } from "./topic-manager.js";
+import { topicManager, validateTopicName } from "./topic-manager.js";
+import { keysEqual } from "./auth.js";
 import type { Message, MessageType } from "@cc2cc/shared";
 
 const startTime = Date.now();
 
 /**
- * Timing-safe comparison of two strings to prevent timing attacks.
- */
-function keysEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
-}
-
-/**
- * Validate the ?key= query parameter.
+ * Validate the API key from a Hono request context.
+ * Prefers the Authorization header ("Bearer <key>"), falls back to the ?key= query param
+ * for backward compatibility with existing plugin and dashboard clients.
  * Returns a 401 Response if invalid, or null if valid.
  */
 export function validateKey(key: string | undefined): Response | null {
@@ -33,6 +26,19 @@ export function validateKey(key: string | undefined): Response | null {
     });
   }
   return null;
+}
+
+/**
+ * Extract the API key from Authorization header (preferred) or ?key= query param (fallback).
+ * Call this in each route handler instead of c.req.query("key") directly.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getKey(c: any): string | undefined {
+  const authHeader = c.req.header("Authorization") as string | undefined;
+  if (authHeader?.startsWith("Bearer ")) {
+    return authHeader.slice(7);
+  }
+  return c.req.query("key") as string | undefined;
 }
 
 /**
@@ -55,7 +61,7 @@ export function buildApiRoutes(app: Hono): void {
 
   // GET /api/instances — returns ALL instances (online + offline) with status field
   app.get("/api/instances", (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
 
     return c.json(registry.getAll());
@@ -63,7 +69,7 @@ export function buildApiRoutes(app: Hono): void {
 
   // GET /api/stats — { messagesToday, activeInstances, queuedTotal }
   app.get("/api/stats", async (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
 
     const allInstances = registry.getAll();
@@ -84,7 +90,7 @@ export function buildApiRoutes(app: Hono): void {
   // Note: the hub doesn't maintain a separate message-by-ID store in v1.
   // This endpoint is a stub for dashboard inspection; returns 404 with a clear message.
   app.get("/api/messages/:id", (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
 
     // In v1, individual message lookup requires scanning queues — not implemented.
@@ -100,7 +106,7 @@ export function buildApiRoutes(app: Hono): void {
 
   // GET /api/ping/:id — check whether an instance is currently online
   app.get("/api/ping/:id", (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
 
     const instanceId = decodeURIComponent(c.req.param("id"));
@@ -112,7 +118,7 @@ export function buildApiRoutes(app: Hono): void {
 
   // DELETE /api/instances/:id — remove a stale offline instance from the registry
   app.delete("/api/instances/:id", async (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
 
     const instanceId = decodeURIComponent(c.req.param("id"));
@@ -139,7 +145,7 @@ export function buildApiRoutes(app: Hono): void {
 
   // DELETE /api/queue/:id — flush a queue (admin)
   app.delete("/api/queue/:id", async (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
 
     const instanceId = decodeURIComponent(c.req.param("id"));
@@ -151,16 +157,18 @@ export function buildApiRoutes(app: Hono): void {
 
   // GET /api/topics — list all topics
   app.get("/api/topics", async (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     return c.json(await topicManager.listTopics());
   });
 
   // GET /api/topics/:name/subscribers — get subscribers for a topic
   app.get("/api/topics/:name/subscribers", async (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     const name = decodeURIComponent(c.req.param("name"));
+    const nameErr = validateTopicName(name);
+    if (nameErr) return c.json({ error: nameErr }, 400);
     if (!(await topicManager.topicExists(name))) {
       return c.json({ error: "topic not found" }, 404);
     }
@@ -169,9 +177,11 @@ export function buildApiRoutes(app: Hono): void {
 
   // POST /api/topics — create a topic (idempotent; only emits topic:created for new topics)
   app.post("/api/topics", async (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     const { name } = await c.req.json<{ name: string }>();
+    const nameErr = validateTopicName(name);
+    if (nameErr) return c.json({ error: nameErr }, 400);
     const isNew = !(await topicManager.topicExists(name));
     const info = await topicManager.createTopic(name, "dashboard");
     if (isNew) {
@@ -187,9 +197,11 @@ export function buildApiRoutes(app: Hono): void {
 
   // DELETE /api/topics/:name — delete a topic
   app.delete("/api/topics/:name", async (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     const name = decodeURIComponent(c.req.param("name"));
+    const nameErrDel = validateTopicName(name);
+    if (nameErrDel) return c.json({ error: nameErrDel }, 400);
     if (!(await topicManager.topicExists(name))) {
       return c.json({ error: "topic not found" }, 404);
     }
@@ -204,9 +216,11 @@ export function buildApiRoutes(app: Hono): void {
 
   // POST /api/topics/:name/subscribe — subscribe an instance to a topic
   app.post("/api/topics/:name/subscribe", async (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     const name = decodeURIComponent(c.req.param("name"));
+    const nameErrSub = validateTopicName(name);
+    if (nameErrSub) return c.json({ error: nameErrSub }, 400);
     if (!(await topicManager.topicExists(name))) {
       return c.json({ error: "topic not found" }, 404);
     }
@@ -226,9 +240,11 @@ export function buildApiRoutes(app: Hono): void {
 
   // POST /api/topics/:name/unsubscribe — unsubscribe an instance from a topic
   app.post("/api/topics/:name/unsubscribe", async (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     const name = decodeURIComponent(c.req.param("name"));
+    const nameErrUnsub = validateTopicName(name);
+    if (nameErrUnsub) return c.json({ error: nameErrUnsub }, 400);
     if (!(await topicManager.topicExists(name))) {
       return c.json({ error: "topic not found" }, 404);
     }
@@ -251,9 +267,11 @@ export function buildApiRoutes(app: Hono): void {
 
   // POST /api/topics/:name/publish — publish a message to a topic
   app.post("/api/topics/:name/publish", async (c) => {
-    const authErr = validateKey(c.req.query("key"));
+    const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     const name = decodeURIComponent(c.req.param("name"));
+    const nameErrPub = validateTopicName(name);
+    if (nameErrPub) return c.json({ error: nameErrPub }, 400);
     if (!(await topicManager.topicExists(name))) {
       return c.json({ error: "topic not found" }, 404);
     }
@@ -261,25 +279,20 @@ export function buildApiRoutes(app: Hono): void {
       content,
       type,
       persistent = false,
-      from,
       metadata,
     } = await c.req.json<{
       content: string;
       type: string;
       persistent?: boolean;
-      from?: string;
       metadata?: Record<string, unknown>;
     }>();
 
-    const wsRefs = new Map<string, { readyState: number; send(d: string): void }>();
-    for (const entry of registry.getOnline()) {
-      const ref = registry.getWsRef(entry.instanceId);
-      if (ref) wsRefs.set(entry.instanceId, ref as { readyState: number; send(d: string): void });
-    }
+    const wsRefs = registry.getOnlineWsRefs();
 
+    // SEC-007: Server-stamp `from` as "dashboard" — ignore any client-supplied from field
     const message: Message = {
       messageId: randomUUID(),
-      from: from ?? "dashboard",
+      from: "dashboard",
       to: `topic:${name}`,
       type: type as MessageType,
       content,
@@ -292,7 +305,7 @@ export function buildApiRoutes(app: Hono): void {
       name,
       message,
       persistent,
-      from ?? "",
+      "dashboard",
       wsRefs,
     );
 

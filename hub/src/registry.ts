@@ -1,6 +1,7 @@
 // hub/src/registry.ts
 import type { InstanceInfo, InstanceStatus } from "@cc2cc/shared";
 import { redis } from "./redis.js";
+import { parseProject } from "./utils.js";
 
 interface RegistryEntry extends InstanceInfo {
   // ws is intentionally kept out of InstanceInfo (shared type must not import Bun types)
@@ -13,12 +14,6 @@ interface RegistryEntry extends InstanceInfo {
  * Redis keys provide the durable presence layer (24h TTL).
  */
 const _map = new Map<string, RegistryEntry>();
-
-function parseProject(instanceId: string): string {
-  // Format: username@host:project/session_uuid
-  const colonPart = instanceId.split(":")[1] ?? "";
-  return colonPart.split("/")[0] ?? instanceId;
-}
 
 export const registry = {
   /**
@@ -81,6 +76,21 @@ export const registry = {
     return Array.from(_map.values()).filter((e) => e.status === "online");
   },
 
+  /**
+   * Returns a Map of instanceId → live WS ref for all currently online instances
+   * that have an active WebSocket reference. Callers (api, ws-handler) use this
+   * to avoid rebuilding the same Map independently on every publish operation.
+   */
+  getOnlineWsRefs(): Map<string, { readyState: number; send(d: string): void }> {
+    const result = new Map<string, { readyState: number; send(d: string): void }>();
+    for (const entry of _map.values()) {
+      if (entry.status === "online" && entry.wsRef) {
+        result.set(entry.instanceId, entry.wsRef as { readyState: number; send(d: string): void });
+      }
+    }
+    return result;
+  },
+
   /** Update cached queue depth (called after each push/pop). */
   setQueueDepth(instanceId: string, depth: number): void {
     const entry = _map.get(instanceId);
@@ -141,6 +151,23 @@ export const registry = {
   async deregister(instanceId: string): Promise<void> {
     _map.delete(instanceId);
     await redis.del(`instance:${instanceId}`);
+  },
+
+  /**
+   * Populate the in-memory map with an offline entry from Redis data.
+   * Called during hub startup to re-hydrate the registry before any WS connections arrive.
+   * Skips instances already present in the map (e.g. populated by a race-condition WS open).
+   */
+  hydrateOffline(instanceId: string, project: string, role?: string): void {
+    if (_map.has(instanceId)) return; // already registered by a live WS connect
+    _map.set(instanceId, {
+      instanceId,
+      project: project || parseProject(instanceId),
+      status: "offline" as InstanceStatus,
+      connectedAt: new Date().toISOString(),
+      queueDepth: 0,
+      role,
+    });
   },
 
   /** For testing — clears all entries. */

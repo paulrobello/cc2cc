@@ -1,5 +1,5 @@
 // dashboard/src/lib/api.ts
-import { InstanceInfoSchema, type MessageType } from "@cc2cc/shared";
+import { InstanceInfoSchema, TopicInfoSchema } from "@cc2cc/shared";
 import type { TopicInfo } from "@cc2cc/shared";
 import { z } from "zod";
 import type { HubStats } from "@/types/dashboard";
@@ -12,8 +12,20 @@ const HUB_BASE =
 
 const API_KEY = process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "";
 
+/**
+ * Build a hub REST URL. The ?key= query param is kept as a backward-compat fallback.
+ * Prefer the Authorization header (see authHeaders) for new requests.
+ */
 function hubUrl(path: string): string {
   return `${HUB_BASE}${path}?key=${encodeURIComponent(API_KEY)}`;
+}
+
+/**
+ * Returns Authorization header for hub REST requests.
+ * Using both header and query param ensures compatibility during the migration window.
+ */
+function authHeaders(): Record<string, string> {
+  return API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {};
 }
 
 const HubStatsSchema = z.object({
@@ -30,6 +42,7 @@ export async function fetchInstances(): Promise<
 > {
   try {
     const res = await fetch(hubUrl("/api/instances"), {
+      headers: authHeaders(),
       next: { revalidate: 0 }, // always fresh
       signal: AbortSignal.timeout(10_000),
     });
@@ -53,6 +66,7 @@ export async function fetchStats(): Promise<HubStats> {
   };
   try {
     const res = await fetch(hubUrl("/api/stats"), {
+      headers: authHeaders(),
       next: { revalidate: 0 },
       signal: AbortSignal.timeout(10_000),
     });
@@ -65,25 +79,6 @@ export async function fetchStats(): Promise<HubStats> {
   }
 }
 
-/**
- * Send a direct message to a specific instance via the hub REST API.
- * Throws on network or non-ok response.
- */
-export async function sendMessage(
-  to: string,
-  type: MessageType,
-  content: string,
-): Promise<void> {
-  const res = await fetch(hubUrl("/api/messages"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ to, type, content }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) {
-    throw new Error(`Send message failed: ${res.status} ${res.statusText}`);
-  }
-}
 
 /**
  * Remove a stale offline instance from the hub registry.
@@ -94,6 +89,7 @@ export async function removeInstance(instanceId: string): Promise<void> {
     hubUrl(`/api/instances/${encodeURIComponent(instanceId)}`),
     {
       method: "DELETE",
+      headers: authHeaders(),
       signal: AbortSignal.timeout(10_000),
     },
   );
@@ -106,45 +102,54 @@ export async function removeInstance(instanceId: string): Promise<void> {
   }
 }
 
-/**
- * Broadcast a message to all online instances via the hub REST API.
- * Throws on network or non-ok response.
- */
-export async function sendBroadcast(
-  type: MessageType,
-  content: string,
-): Promise<void> {
-  const res = await fetch(hubUrl("/api/broadcast"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type, content }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) {
-    throw new Error(`Broadcast failed: ${res.status} ${res.statusText}`);
-  }
-}
 
 export async function fetchTopics(): Promise<TopicInfo[]> {
-  const res = await fetch(hubUrl("/api/topics"));
+  const res = await fetch(hubUrl("/api/topics"), {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) throw new Error("Failed to fetch topics");
-  return res.json() as Promise<TopicInfo[]>;
+  const data = await res.json();
+  return z.array(TopicInfoSchema).parse(data);
+}
+
+/**
+ * Fetch the subscriber list for a single topic.
+ * Returns an empty array on error so callers degrade gracefully.
+ */
+export async function fetchTopicSubscribers(name: string): Promise<string[]> {
+  try {
+    const res = await fetch(hubUrl(`/api/topics/${encodeURIComponent(name)}/subscribers`), {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return [];
+    return res.json() as Promise<string[]>;
+  } catch {
+    return [];
+  }
 }
 
 export async function createTopic(name: string): Promise<TopicInfo> {
   const res = await fetch(hubUrl("/api/topics"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ name }),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) throw new Error("Failed to create topic");
-  return res.json() as Promise<TopicInfo>;
+  const data = await res.json();
+  return TopicInfoSchema.parse(data);
 }
 
 export async function deleteTopic(name: string): Promise<void> {
-  const res = await fetch(hubUrl(`/api/topics/${encodeURIComponent(name)}`), { method: "DELETE" });
+  const res = await fetch(hubUrl(`/api/topics/${encodeURIComponent(name)}`), {
+    method: "DELETE",
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) {
-    const body = await res.json() as { error?: string };
+    const body = await res.json().catch(() => ({})) as { error?: string };
     throw new Error(body.error ?? "Failed to delete topic");
   }
 }
@@ -152,8 +157,9 @@ export async function deleteTopic(name: string): Promise<void> {
 export async function subscribeToTopic(name: string, instanceId: string): Promise<void> {
   const res = await fetch(hubUrl(`/api/topics/${encodeURIComponent(name)}/subscribe`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ instanceId }),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) throw new Error("Failed to subscribe");
 }
@@ -161,11 +167,12 @@ export async function subscribeToTopic(name: string, instanceId: string): Promis
 export async function unsubscribeFromTopic(name: string, instanceId: string): Promise<void> {
   const res = await fetch(hubUrl(`/api/topics/${encodeURIComponent(name)}/unsubscribe`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ instanceId }),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error ?? "Failed to unsubscribe");
+    const body = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? "Failed to unsubscribe");
   }
 }

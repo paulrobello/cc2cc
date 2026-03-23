@@ -1,19 +1,20 @@
 // plugin/src/index.ts
-import fs from "node:fs";
-import path from "node:path";
-
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { buildInstanceId, buildWsUrl, loadConfig } from "./config.js";
+import { loadConfig } from "./config.js";
 import { HubConnection } from "./connection.js";
 import { emitChannelNotification } from "./channel.js";
 import { createTools } from "./tools.js";
+import { watchSession } from "./session-watcher.js";
 import type { Message } from "@cc2cc/shared";
 import {
   MessageType,
+  SendMessageInputSchema,
+  BroadcastInputSchema,
+  GetMessagesInputSchema,
   SetRoleInputSchema,
   SubscribeTopicInputSchema,
   UnsubscribeTopicInputSchema,
@@ -55,7 +56,7 @@ Always check reply_to when receiving results to match them to outstanding tasks.
 
 // ── Hub Connection ───────────────────────────────────────────────────────────
 
-let conn = new HubConnection(config.wsUrl, config.apiKey);
+let conn = new HubConnection(config.wsUrl);
 let tools = createTools(config, conn);
 
 /** Wire message and error handlers onto a HubConnection instance. */
@@ -92,47 +93,16 @@ wireConnHandlers(conn);
 
 // ── Session File Watcher ────────────────────────────────────────────────────
 
-let currentSessionId = config.sessionId;
-
-const sessionFile = path.join(process.cwd(), ".claude", ".cc2cc-session-id");
-
-// Watch for session ID changes (fires on /clear in Claude Code)
-// fs.watchFile uses polling and tolerates non-existent files, so the watcher
-// is always active even when the session file doesn't exist at startup.
-let sessionWatcherActive = false;
-fs.watchFile(sessionFile, { interval: 2000, persistent: false }, async () => {
-  if (sessionWatcherActive) return; // debounce
-  sessionWatcherActive = true;
-  try {
-    const newSessionId = fs.readFileSync(sessionFile, "utf-8").trim();
-    if (!newSessionId || newSessionId === currentSessionId) return;
-
-    const newInstanceId = buildInstanceId(config, newSessionId);
-
-    // Notify hub: migrate queue and re-register
-    await conn.request("session_update", { newInstanceId });
-
-    // Update config in-place so tools use the new identity
-    const oldInstanceId = config.instanceId;
-    config.instanceId = newInstanceId;
-    config.wsUrl = buildWsUrl(config.hubUrl, config.apiKey, newInstanceId);
-    config.sessionId = newSessionId;
-    currentSessionId = newSessionId;
-
-    process.stderr.write(`[cc2cc] session updated: ${oldInstanceId} → ${newInstanceId}\n`);
-
-    // Reconnect with new identity
-    const oldConn = conn;
-    conn = new HubConnection(config.wsUrl, config.apiKey);
-    wireConnHandlers(conn);
-    tools = createTools(config, conn);
-    conn.connect();
-    oldConn.destroy();
-  } catch (err) {
-    process.stderr.write(`[cc2cc] session update error: ${(err as Error).message}\n`);
-  } finally {
-    sessionWatcherActive = false;
-  }
+// Extracted to session-watcher.ts — watches for /clear events and migrates the session.
+const state = { conn, tools };
+const unwatchSession = watchSession(config, state, {
+  onReconnect: (newState, _oldConn) => {
+    // After session-watcher replaces conn/tools, re-wire handlers on the new conn
+    wireConnHandlers(newState.conn);
+    // Keep module-level references in sync
+    conn = newState.conn;
+    tools = newState.tools;
+  },
 });
 
 // ── Tool Definitions (ListTools) ─────────────────────────────────────────────
@@ -311,15 +281,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "send_message": {
-        const input = z
-          .object({
-            to: z.string(),
-            type: z.nativeEnum(MessageType),
-            content: z.string(),
-            replyToMessageId: z.string().optional(),
-            metadata: z.record(z.string(), z.unknown()).optional(),
-          })
-          .parse(args);
+        const input = SendMessageInputSchema.parse(args);
 
         const result = await tools.send_message(input);
         return {
@@ -328,13 +290,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "broadcast": {
-        const input = z
-          .object({
-            type: z.nativeEnum(MessageType),
-            content: z.string(),
-            metadata: z.record(z.string(), z.unknown()).optional(),
-          })
-          .parse(args);
+        const input = BroadcastInputSchema.parse(args);
 
         const result = await tools.broadcast(input);
         return {
@@ -343,11 +299,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "get_messages": {
-        const input = z
-          .object({
-            limit: z.number().int().min(1).max(100).default(10),
-          })
-          .parse(args);
+        const input = GetMessagesInputSchema.parse(args);
 
         const messages = await tools.get_messages(input);
         return {
@@ -416,17 +368,25 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 // ── Connect and Start ─────────────────────────────────────────────────────────
 
-conn.connect();
-
-const transport = new StdioServerTransport();
-await mcp.connect(transport);
-
-// Graceful shutdown
+// Graceful shutdown — registered before connect so they fire even if connect throws
 process.on("SIGINT", () => {
+  unwatchSession();
   conn.destroy();
   process.exit(0);
 });
 process.on("SIGTERM", () => {
+  unwatchSession();
   conn.destroy();
   process.exit(0);
+});
+
+async function main(): Promise<void> {
+  conn.connect();
+  const transport = new StdioServerTransport();
+  await mcp.connect(transport);
+}
+
+main().catch((err: unknown) => {
+  process.stderr.write(`[cc2cc] fatal startup error: ${(err as Error).message}\n`);
+  process.exit(1);
 });

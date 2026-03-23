@@ -7,6 +7,12 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${CC2CC_REDIS_PASSWORD:-changeme}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   hub:
     build:
@@ -21,7 +27,7 @@ services:
       CC2CC_HUB_PORT: 3100
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
 
   dashboard:
     build:

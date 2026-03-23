@@ -1,7 +1,7 @@
 // dashboard/src/components/activity-timeline/activity-timeline.tsx
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   cn,
   messageTypeColor,
@@ -31,8 +31,21 @@ export function ActivityTimeline({
   const windowMs = windowMinutes * 60 * 1000;
   const bucketMs = windowMs / BUCKET_COUNT;
 
+  // Track wall-clock "now" with a stable ref updated by a 5-second interval.
+  // Using a ref + state pair avoids stale Date.now() captures inside useMemo:
+  // the state tick forces a re-render, and the ref always has the latest value.
+  const nowMsRef = useRef(Date.now());
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      nowMsRef.current = Date.now();
+      setTick((t) => t + 1);
+    }, 5_000);
+    return () => clearInterval(id);
+  }, []);
+
   const grid = useMemo(() => {
-    const nowMs = Date.now(); // eslint-disable-line react-hooks/purity
+    const nowMs = nowMsRef.current;
     type BucketEntry = { color: string; label: string; content: string };
     const map = new Map<string, BucketEntry[][]>();
 

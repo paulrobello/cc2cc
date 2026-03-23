@@ -42,7 +42,13 @@ const redisMock = {
   checkRedisHealth: mock(async () => true),
 };
 const configMock = {
-  config: { apiKey: "test-key", port: 3100, redisUrl: "redis://localhost:6379" },
+  config: {
+    apiKey: "test-key",
+    port: 3100,
+    redisUrl: "redis://localhost:6379",
+    dashboardOrigin: "*",
+  },
+  REDIS_TTL_SECONDS: 86400,
 };
 
 // Mock topicManager
@@ -73,6 +79,7 @@ mock.module("../src/config.js", () => configMock);
 mock.module("../src/topic-manager.js", () => ({
   topicManager: topicManagerMock,
   parseProject: (id: string) => id.split(":")[1]?.split("/")[0] ?? id,
+  validateTopicName: (_name: unknown) => null, // null = valid; tests don't exercise validation
 }));
 
 // Mock ws-handler (api.ts calls emitToDashboards)

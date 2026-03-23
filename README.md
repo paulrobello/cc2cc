@@ -13,7 +13,6 @@
    * [Core Capabilities](#core-capabilities)
    * [Advanced Features](#advanced-features)
    * [Technical Excellence](#technical-excellence)
-* [Screenshots](#screenshots)
 * [Prerequisites](#prerequisites)
 * [Quick Start](#quick-start)
    * [Docker (recommended)](#docker-recommended)
@@ -69,10 +68,6 @@ cc2cc (Claude-to-Claude) is a hub-and-spoke system that lets Claude Code instanc
 - **WebSocket Protocol**: Full-duplex communication with exponential backoff reconnection
 - **Docker Ready**: Single `make docker-up` deploys hub + Redis + dashboard
 - **Comprehensive Testing**: Bun test for hub/plugin/shared, Jest + jsdom for dashboard
-
-## Screenshots
-
-*Coming soon — see the [interactive slideshow](https://paulrobello.github.io/cc2cc/) for a visual overview.*
 
 ## Prerequisites
 
@@ -489,13 +484,25 @@ For deployments that require broader access (e.g. across VPNs or to non-LAN user
 
 The system uses a hub-and-spoke topology:
 
-```
-cc2cc/
-├── packages/shared/   @cc2cc/shared — types, Zod schemas, HubEvent shapes
-├── hub/               Bun + Hono server, port 3100
-├── plugin/            MCP stdio server — one per Claude Code session
-├── dashboard/         Next.js 16 monitoring UI, port 8029
-└── skill/             Markdown collaboration skill + plugin.json manifest
+```mermaid
+graph TD
+    SHARED["packages/shared — types, Zod schemas, HubEvent shapes"]
+    HUB["hub — Bun + Hono server, port 3100"]
+    PLUGIN["plugin — MCP stdio server (one per Claude Code session)"]
+    DASH["dashboard — Next.js monitoring UI, port 8029"]
+    SKILL["skill — collaboration protocol + plugin manifest"]
+
+    SHARED --> HUB
+    SHARED --> PLUGIN
+    SHARED --> DASH
+    PLUGIN -->|"ws://hub:3100/ws/plugin"| HUB
+    DASH -->|"ws://hub:3100/ws/dashboard + ws/plugin"| HUB
+
+    style SHARED fill:#37474f,stroke:#78909c,stroke-width:2px,color:#ffffff
+    style HUB fill:#e65100,stroke:#ff9800,stroke-width:3px,color:#ffffff
+    style PLUGIN fill:#1b5e20,stroke:#4caf50,stroke-width:2px,color:#ffffff
+    style DASH fill:#4a148c,stroke:#9c27b0,stroke-width:2px,color:#ffffff
+    style SKILL fill:#0d47a1,stroke:#2196f3,stroke-width:2px,color:#ffffff
 ```
 
 For full architecture details — workspace layout, component responsibilities, WebSocket protocol, REST API, queue design, and design invariants — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

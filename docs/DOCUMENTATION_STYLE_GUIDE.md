@@ -1,6 +1,6 @@
 # Documentation Style Guide
 
-This guide establishes standards and best practices for creating and maintaining documentation in the Par Terminal Emulator project. It ensures consistency, clarity, and professionalism across all technical documentation.
+This guide establishes standards and best practices for creating and maintaining documentation in the cc2cc project. It ensures consistency, clarity, and professionalism across all technical documentation.
 
 ## Table of Contents
 - [Quick Reference](#quick-reference)

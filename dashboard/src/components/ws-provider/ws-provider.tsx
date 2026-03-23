@@ -17,8 +17,7 @@ import type {
   TopicState,
   WsContextValue,
 } from "@/types/dashboard";
-import type { TopicInfo } from "@cc2cc/shared";
-import { fetchInstances } from "@/lib/api";
+import { fetchInstances, fetchTopics, fetchTopicSubscribers } from "@/lib/api";
 
 /** Maximum number of messages retained in the feed */
 const MAX_FEED_SIZE = 500;
@@ -121,24 +120,15 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const seedTopics = useCallback(async () => {
-    const hubHttpUrl = (process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100")
-      .replace(/^wss?:\/\//, (m) => (m === "wss://" ? "https://" : "http://"));
-    const apiKey = process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "";
-    const res = await fetch(`${hubHttpUrl}/api/topics?key=${encodeURIComponent(apiKey)}`);
-    if (!res.ok || !mountedRef.current) return;
-    const list = await res.json() as TopicInfo[];
-    // Fetch subscribers for each topic in parallel
-    const subsResults = await Promise.all(
-      list.map(async (t) => {
-        try {
-          const subRes = await fetch(
-            `${hubHttpUrl}/api/topics/${encodeURIComponent(t.name)}/subscribers?key=${encodeURIComponent(apiKey)}`,
-          );
-          if (subRes.ok) return await subRes.json() as string[];
-        } catch { /* ignore */ }
-        return [] as string[];
-      }),
-    );
+    let list;
+    try {
+      list = await fetchTopics();
+    } catch {
+      return; // hub unreachable — degrade gracefully
+    }
+    if (!mountedRef.current) return;
+    // Fetch subscribers for each topic in parallel using the api helper
+    const subsResults = await Promise.all(list.map((t) => fetchTopicSubscribers(t.name)));
     if (!mountedRef.current) return;
     setTopics((prev) => {
       const next = new Map(prev);
@@ -244,7 +234,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
               messageId: crypto.randomUUID(),
               from: evt.from,
               to: "broadcast",
-              type: MessageType.task,
+              type: (evt.type as MessageType | undefined) ?? MessageType.task,
               content: evt.content,
               timestamp: evt.timestamp,
             },
@@ -312,6 +302,23 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             if (t) {
               next.set(evt.name, { ...t, subscriberCount: Math.max(0, t.subscriberCount - 1), subscribers: t.subscribers.filter((id) => id !== evt.instanceId) });
             }
+            return next;
+          });
+          break;
+
+        case "instance:session_updated":
+          setInstances((prev) => {
+            const next = new Map(prev);
+            // Remove the old session entry
+            next.delete(evt.oldInstanceId);
+            // Upsert the new session as online
+            next.set(evt.newInstanceId, {
+              instanceId: evt.newInstanceId,
+              project: evt.newInstanceId.split(":")[1]?.split("/")[0] ?? "",
+              status: "online",
+              connectedAt: evt.timestamp,
+              queueDepth: 0,
+            });
             return next;
           });
           break;
@@ -495,6 +502,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content, type, persistent, metadata, from: dashboardInstanceId }),
+          signal: AbortSignal.timeout(10_000),
         },
       ).then((r) => { if (!r.ok) throw new Error(`publish failed: ${r.status}`); });
     },
@@ -505,7 +513,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     mountedRef.current = true;
-    // seedInstances and seedTopics are async — setState fires after promise resolves, guarded by mountedRef
+    // seedInstances and seedTopics are async — setState fires after promise resolves, guarded by mountedRef.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     seedInstances();
     seedTopics();

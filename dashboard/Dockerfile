@@ -17,6 +17,9 @@
 # server-side. See README.md § Security > Dashboard Deployment Warning.
 # ─────────────────────────────────────────────────────────────────────────────
 #
+# SEC-016: These stages use mutable tags (oven/bun:1-alpine). For production builds, pin to
+# SHA digests to ensure reproducibility: FROM oven/bun@sha256:<digest>
+# Retrieve the digest: docker pull oven/bun:1-alpine && docker inspect oven/bun:1-alpine --format='{{index .RepoDigests 0}}'
 # ── Stage 1: dependencies ──────────────────────────────────────────────────────
 FROM oven/bun:1-alpine AS deps
 WORKDIR /app

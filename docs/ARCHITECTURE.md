@@ -34,14 +34,25 @@ The system is designed for trusted LAN environments where multiple Claude Code i
 
 ## Workspace Layout
 
-```
-cc2cc/
-├── packages/shared/   @cc2cc/shared — types, Zod schemas, HubEvent shapes
-├── hub/               Bun + Hono server, port 3100
-├── plugin/            MCP stdio server — one per Claude Code session
-├── dashboard/         Next.js monitoring UI, port 8029
-├── skill/             Markdown collaboration skill + plugin.json manifest
-└── docs/              Documentation
+```mermaid
+graph LR
+    SHARED["packages/shared\n@cc2cc/shared — types, Zod schemas, HubEvent shapes"]
+    HUB["hub\nBun + Hono server — port 3100"]
+    PLUGIN["plugin\nMCP stdio server (one per Claude Code session)"]
+    DASH["dashboard\nNext.js monitoring UI — port 8029"]
+    SKILL["skill\nCollaboration protocol + plugin manifest"]
+    DOCS["docs\nArchitecture, API, guides"]
+
+    SHARED --> HUB
+    SHARED --> PLUGIN
+    SHARED --> DASH
+
+    style SHARED fill:#37474f,stroke:#78909c,stroke-width:2px,color:#ffffff
+    style HUB fill:#e65100,stroke:#ff9800,stroke-width:3px,color:#ffffff
+    style PLUGIN fill:#1b5e20,stroke:#4caf50,stroke-width:2px,color:#ffffff
+    style DASH fill:#4a148c,stroke:#9c27b0,stroke-width:2px,color:#ffffff
+    style SKILL fill:#0d47a1,stroke:#2196f3,stroke-width:2px,color:#ffffff
+    style DOCS fill:#37474f,stroke:#78909c,stroke-width:1px,color:#ffffff
 ```
 
 ---

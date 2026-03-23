@@ -29,12 +29,10 @@ export class HubConnection extends EventEmitter {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private currentDelay: number;
 
-  constructor(url: string, _apiKey: string, opts: ConnectionOptions = {}) {
+  constructor(url: string, opts: ConnectionOptions = {}) {
     super();
-    // The API key is embedded in the URL as a query parameter by the caller
-    // (config.ts assembles wsUrl = hubUrl + /ws/plugin?key=apiKey).
-    // Accepting _apiKey here allows callers that pass the raw hub URL to work
-    // in tests — production callers should pass the pre-assembled wsUrl.
+    // The API key is embedded in the URL as a query parameter by config.ts:
+    // wsUrl = hubUrl + /ws/plugin?key=apiKey. The URL is passed directly here.
     this.url = url;
     this.opts = {
       initialDelayMs: opts.initialDelayMs ?? 1000,

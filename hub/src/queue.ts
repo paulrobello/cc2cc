@@ -1,9 +1,11 @@
 // hub/src/queue.ts
 import type { Message } from "@cc2cc/shared";
 import { redis } from "./redis.js";
+import { REDIS_TTL_SECONDS } from "./config.js";
 
 const MAX_QUEUE_DEPTH = 1000;
-const QUEUE_TTL_SECONDS = 86400; // 24h
+/** Alias for clarity — queue TTL matches the instance presence TTL (24h). */
+const QUEUE_TTL_SECONDS = REDIS_TTL_SECONDS;
 
 function queueKey(instanceId: string): string {
   return `queue:${instanceId}`;

@@ -17,6 +17,6 @@
     "checkall": "bun run fmt && bun run lint && bun run typecheck && bun run test"
   },
   "devDependencies": {
-    "typescript": "latest"
+    "typescript": "^5.9.3"
   }
 }

@@ -18,16 +18,26 @@ import type { WsData } from "./ws-handler.js";
 import type { ServerWebSocket } from "bun";
 import { redis } from "./redis.js";
 import { replayProcessing } from "./queue.js";
+import { registry } from "./registry.js";
 
 const app = new Hono();
 
-// Allow cross-origin requests from the dashboard (different port)
+// Security headers for all REST responses
+app.use("*", async (c, next) => {
+  await next();
+  c.res.headers.set("X-Content-Type-Options", "nosniff");
+  c.res.headers.set("X-Frame-Options", "DENY");
+  c.res.headers.set("Referrer-Policy", "no-referrer");
+});
+
+// Allow cross-origin requests from the dashboard.
+// Controlled by CC2CC_DASHBOARD_ORIGIN env var (defaults to '*' with a warning logged at startup).
 app.use(
   "*",
   cors({
-    origin: "*",
+    origin: config.dashboardOrigin,
     allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type"],
+    allowHeaders: ["Content-Type", "Authorization"],
   }),
 );
 
@@ -35,7 +45,7 @@ app.use(
 buildApiRoutes(app);
 
 // Bun WebSocket server — handles upgrade for /ws/plugin and /ws/dashboard
-// biome-ignore lint/correctness/noUnusedVariables: server reference is kept for potential graceful shutdown
+// `server` is kept in scope so that SIGTERM / SIGINT handlers can call server.stop().
 const server = Bun.serve<WsData>({
   port: config.port,
   fetch(req, server) {
@@ -104,31 +114,83 @@ const server = Bun.serve<WsData>({
 
 console.log(`[hub] listening on port ${config.port}`);
 
-// On startup: scan for any processing:* keys left over from a previous hub
-// crash or unclean shutdown and replay them back into their queues so
-// at-least-once delivery holds across restarts.
+// Graceful shutdown — stop accepting new connections then let the process exit.
+async function shutdown(signal: string): Promise<void> {
+  console.log(`[hub] ${signal} received — shutting down`);
+  await server.stop();
+  await redis.quit();
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => {
+  shutdown("SIGTERM").catch(console.error);
+});
+process.on("SIGINT", () => {
+  shutdown("SIGINT").catch(console.error);
+});
+
+// On startup: perform two Redis scans in parallel:
+// 1. Re-hydrate in-memory registry from instance:* keys (so /api/instances is accurate immediately)
+// 2. Replay any processing:* keys left from a previous crash (at-least-once delivery guarantee)
 (async () => {
   try {
-    // Use SCAN (not KEYS) to avoid blocking the Redis event loop on large keyspaces.
-    let cursor = "0";
-    let total = 0;
+    // ── 1. Re-hydrate registry ──────────────────────────────────────────────
+    // Use SCAN (not KEYS) to avoid blocking Redis.
+    let regCursor = "0";
+    let regTotal = 0;
     do {
-      const [nextCursor, keys] = await redis.scan(cursor, "MATCH", "processing:*", "COUNT", 100);
-      cursor = nextCursor;
+      const [nextCursor, keys] = await redis.scan(regCursor, "MATCH", "instance:*", "COUNT", 100);
+      regCursor = nextCursor;
       for (const key of keys) {
-        // Strip the "processing:" prefix to recover the instanceId.
+        const instanceId = key.slice("instance:".length);
+        try {
+          const raw = await redis.get(key);
+          if (!raw) continue;
+          const data = JSON.parse(raw) as {
+            instanceId?: string;
+            project?: string;
+            connectedAt?: string;
+            role?: string;
+          };
+          // Populate _map with offline entry — WS connect will promote to online
+          registry.hydrateOffline(instanceId, data.project ?? instanceId, data.role);
+          regTotal++;
+        } catch {
+          // Malformed Redis value — skip gracefully
+        }
+      }
+    } while (regCursor !== "0");
+    if (regTotal > 0) {
+      console.log(`[hub] startup: re-hydrated ${regTotal} instance(s) from Redis`);
+    }
+
+    // ── 2. Replay in-flight messages ────────────────────────────────────────
+    let procCursor = "0";
+    let procTotal = 0;
+    do {
+      const [nextCursor, keys] = await redis.scan(
+        procCursor,
+        "MATCH",
+        "processing:*",
+        "COUNT",
+        100,
+      );
+      procCursor = nextCursor;
+      for (const key of keys) {
         const instanceId = key.slice("processing:".length);
         const replayed = await replayProcessing(instanceId);
         if (replayed > 0) {
           console.log(`[hub] startup: replayed ${replayed} message(s) for ${instanceId}`);
-          total += replayed;
+          procTotal += replayed;
         }
       }
-    } while (cursor !== "0");
-    if (total > 0) {
-      console.log(`[hub] startup: replayed ${total} total in-flight message(s) from processing keys`);
+    } while (procCursor !== "0");
+    if (procTotal > 0) {
+      console.log(
+        `[hub] startup: replayed ${procTotal} total in-flight message(s) from processing keys`,
+      );
     }
   } catch (err) {
-    console.error("[hub] startup: replayProcessing scan failed", (err as Error).message);
+    console.error("[hub] startup: initialization scan failed", (err as Error).message);
   }
 })();

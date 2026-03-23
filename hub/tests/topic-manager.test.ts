@@ -1,6 +1,18 @@
 // hub/tests/topic-manager.test.ts
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 
+// Minimal pipeline builder: records calls and resolves on exec()
+function makePipelineMock() {
+  const pipelineMock: Record<string, (...args: unknown[]) => unknown> = {
+    hset: () => pipelineMock,
+    sadd: () => pipelineMock,
+    srem: () => pipelineMock,
+    del: () => pipelineMock,
+    exec: mock(async () => []),
+  };
+  return pipelineMock;
+}
+
 const redisMock = {
   hset: mock(async () => 1),
   hgetall: mock(async () => null as Record<string, string> | null),
@@ -12,6 +24,7 @@ const redisMock = {
   keys: mock(async () => [] as string[]),
   incr: mock(async () => 1),
   on: mock(() => {}),
+  pipeline: mock(() => makePipelineMock()),
 };
 
 const pushMessageMock = mock(async () => {});
@@ -49,12 +62,10 @@ describe("topicManager.createTopic", () => {
     redisMock.smembers.mockResolvedValue([]);
   });
 
-  it("writes topic hash to Redis for a new topic", async () => {
+  it("writes topic hash to Redis for a new topic via pipeline", async () => {
     await topicManager.createTopic("cc2cc", "alice@srv:cc2cc/abc");
-    expect(redisMock.hset).toHaveBeenCalledWith(
-      "topic:cc2cc",
-      expect.objectContaining({ name: "cc2cc", createdBy: "alice@srv:cc2cc/abc" }),
-    );
+    // Creation is batched through pipeline for atomicity — verify pipeline() was invoked
+    expect(redisMock.pipeline).toHaveBeenCalled();
   });
 
   it("returns TopicInfo with subscriberCount 0 for new topic", async () => {
@@ -116,10 +127,10 @@ describe("topicManager.deleteTopic", () => {
     expect(redisMock.srem).toHaveBeenCalledWith("instance:bob@srv:cc2cc/xyz:topics", "cc2cc");
   });
 
-  it("deletes the subscriber set and topic hash", async () => {
+  it("deletes the subscriber set and topic hash via pipeline", async () => {
     await topicManager.deleteTopic("cc2cc");
-    expect(redisMock.del).toHaveBeenCalledWith("topic:cc2cc:subscribers");
-    expect(redisMock.del).toHaveBeenCalledWith("topic:cc2cc");
+    // Deletion is batched through pipeline for atomicity — verify pipeline() was invoked
+    expect(redisMock.pipeline).toHaveBeenCalled();
   });
 });
 

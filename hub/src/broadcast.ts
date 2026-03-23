@@ -2,6 +2,9 @@
 import type { MessageType } from "@cc2cc/shared";
 import { randomUUID } from "node:crypto";
 
+/** WebSocket.OPEN numeric value. The WebSocket global is not available in Bun server context. */
+const WS_OPEN = 1;
+
 interface BroadcastResult {
   delivered: number;
   rateLimited: boolean;
@@ -68,7 +71,7 @@ export class BroadcastManager {
     let delivered = 0;
     for (const [instanceId, ws] of this._pluginWs.entries()) {
       if (instanceId === fromInstanceId) continue;
-      if (ws.readyState !== 1 /* WebSocket.OPEN */) continue;
+      if (ws.readyState !== WS_OPEN) continue;
       ws.send(envelope);
       delivered++;
     }

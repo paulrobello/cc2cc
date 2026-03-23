@@ -36,7 +36,7 @@ describe("Plugin integration: hub WS message → channel notification", () => {
       const notificationSpy = mock(async (_params: unknown) => {});
       const fakeMcp = { notification: notificationSpy } as any;
 
-      const conn = new HubConnection(`ws://127.0.0.1:${INTEGRATION_PORT}`, "test-key");
+      const conn = new HubConnection(`ws://127.0.0.1:${INTEGRATION_PORT}`);
       const receivedMessages: Message[] = [];
 
       // Wire connection to channel emitter — same as index.ts does
@@ -100,7 +100,7 @@ describe("Plugin integration: hub WS message → channel notification", () => {
       const notificationSpy = mock(async (_params: unknown) => {});
       const fakeMcp = { notification: notificationSpy } as any;
 
-      const conn = new HubConnection(`ws://127.0.0.1:${INTEGRATION_PORT + 1}`, "test-key");
+      const conn = new HubConnection(`ws://127.0.0.1:${INTEGRATION_PORT + 1}`);
 
       conn.on("message", async (data: unknown) => {
         const frame = data as { messageId?: string } & Message;

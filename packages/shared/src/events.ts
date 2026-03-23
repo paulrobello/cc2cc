@@ -24,6 +24,7 @@ const BroadcastSentEventSchema = z.object({
 	event: z.literal("broadcast:sent"),
 	from: z.string().min(1),
 	content: z.string().min(1),
+	type: z.string().optional(),
 	timestamp: z.string().datetime(),
 });
 
@@ -88,7 +89,9 @@ const TopicMessageEventSchema = z.object({
 const InstanceRoleUpdatedEventSchema = z.object({
 	event: z.literal("instance:role_updated"),
 	instanceId: z.string().min(1),
-	role: z.string().min(1),
+	// Allow empty string — an empty role signals that the role was cleared.
+	// The emitter in ws-handler.ts uses `updated.role ?? ""` to normalize undefined → "".
+	role: z.string(),
 	timestamp: z.string().datetime(),
 });
 
