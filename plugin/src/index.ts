@@ -60,6 +60,15 @@ let tools = createTools(config, conn);
 
 /** Wire message and error handlers onto a HubConnection instance. */
 function wireConnHandlers(c: HubConnection): void {
+  // Auto-subscribe to the project topic on every connect (idempotent — hub also
+  // does this server-side, but sending the frame ourselves ensures the subscription
+  // is confirmed without requiring the agent to call subscribe_topic manually).
+  c.on("open", () => {
+    c.request("subscribe_topic", { topic: config.project }).catch((err: Error) => {
+      process.stderr.write(`[cc2cc] auto-subscribe to project topic failed: ${err.message}\n`);
+    });
+  });
+
   // Route inbound hub WS messages to channel notifications
   c.on("message", async (data: unknown) => {
     try {

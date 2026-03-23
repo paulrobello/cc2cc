@@ -64,12 +64,10 @@ Topics are named pub/sub channels. Your project topic (e.g. `cc2cc`) is automati
 created and joined when you connect — never unsubscribe from it.
 
 ### At session start
-1. Call `subscribe_topic("{your-project-name}")` to explicitly join your project topic
-   (e.g. `subscribe_topic("cc2cc")` for a project named `cc2cc`). The hub auto-subscribes
-   you server-side on connect, but calling this explicitly confirms the subscription is
-   active and is idempotent — safe to call even if already subscribed.
-2. Review your subscriptions from the `subscriptions:sync` frame. Call `list_topics()` to
-   see all available topics. Unsubscribe from any no longer relevant; ask the user if unsure.
+Your project topic is auto-joined: the hub subscribes you server-side on connect, and the
+plugin reinforces this by sending a `subscribe_topic` frame automatically — no manual call
+needed. Review your subscriptions from the `subscriptions:sync` frame. Call `list_topics()`
+to see all available topics. Unsubscribe from any no longer relevant; ask the user if unsure.
 
 ### Naming conventions
 Always prefix generic topic names with your project:
