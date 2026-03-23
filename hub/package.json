@@ -15,12 +15,12 @@
   },
   "dependencies": {
     "@cc2cc/shared": "workspace:*",
-    "hono": "latest",
-    "ioredis": "latest"
+    "hono": "^4.12.8",
+    "ioredis": "^5.7.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "latest",
-    "@types/bun": "latest",
-    "typescript": "latest"
+    "@biomejs/biome": "^2.4.8",
+    "@types/bun": "^1.3.11",
+    "typescript": "^5.9.3"
   }
 }
