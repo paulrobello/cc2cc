@@ -250,6 +250,8 @@ export async function onPluginMessage(
     // Check if `to` field requests broadcast routing — fan-out instead of direct delivery
     if (typeof msg.to === "string" && msg.to === "broadcast") {
       await handleBroadcast(ws, instanceId, msg);
+    } else if (typeof msg.to === "string" && msg.to.startsWith("role:")) {
+      await handleRoleSend(ws, instanceId, msg);
     } else {
       await handleSendMessage(ws, instanceId, msg);
     }
@@ -352,6 +354,96 @@ async function handleSendMessage(
       messageId: envelope.messageId,
       queued,
       ...(warning ? { warning } : {}),
+    }),
+  );
+}
+
+/**
+ * Role-based fan-out: send a message to every instance whose role matches `role:<name>`.
+ * Each recipient gets its own copy of the envelope (unique messageId).
+ * The sender is excluded from its own fan-out.
+ * Emits one message:sent + queue:stats HubEvent per recipient.
+ * Returns { role, recipients, delivered, queued } to the caller.
+ */
+async function handleRoleSend(
+  ws: ServerWebSocket<WsData>,
+  fromInstanceId: string,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  const parseResult = SendMessageInputSchema.safeParse(msg);
+  if (!parseResult.success) {
+    ws.send(
+      JSON.stringify({
+        error: "Invalid send_message payload",
+        details: parseResult.error.flatten(),
+        requestId: msg.requestId,
+      }),
+    );
+    return;
+  }
+
+  const { to, type, content, replyToMessageId, metadata } = parseResult.data;
+  const role = to.slice(5); // strip "role:"
+  const requestId = msg.requestId as string | undefined;
+
+  const targets = registry.getByRole(role).filter((t) => t.instanceId !== fromInstanceId);
+
+  if (targets.length === 0) {
+    ws.send(
+      JSON.stringify({
+        error: `no instances found with role: ${role}`,
+        ...(requestId ? { requestId } : {}),
+      }),
+    );
+    return;
+  }
+
+  const recipients: string[] = [];
+  let delivered = 0;
+  let queued = 0;
+  const now = new Date().toISOString();
+
+  for (const target of targets) {
+    const envelope: Message = {
+      messageId: randomUUID(),
+      from: fromInstanceId,
+      to: target.instanceId,
+      type: type as MessageType,
+      content,
+      replyToMessageId,
+      metadata,
+      timestamp: now,
+    };
+
+    const depth = await pushMessage(target.instanceId, envelope);
+    registry.setQueueDepth(target.instanceId, depth);
+
+    const recipientWs = registry.getWsRef(target.instanceId) as ServerWebSocket<WsData> | undefined;
+    if (recipientWs && recipientWs.readyState === WS_OPEN) {
+      recipientWs.send(JSON.stringify(envelope));
+      delivered++;
+    } else {
+      queued++;
+    }
+
+    recipients.push(target.instanceId);
+
+    emitToDashboards({ event: "message:sent", message: envelope, timestamp: now });
+    emitToDashboards({
+      event: "queue:stats",
+      instanceId: target.instanceId,
+      depth,
+      timestamp: now,
+    });
+  }
+
+  ws.send(
+    JSON.stringify({
+      ...(requestId ? { requestId } : {}),
+      role,
+      recipients,
+      delivered,
+      queued,
     }),
   );
 }

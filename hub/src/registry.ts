@@ -146,6 +146,14 @@ export const registry = {
   },
 
   /**
+   * Return all instances whose role matches the given role string (exact match).
+   * Includes both online and offline instances.
+   */
+  getByRole(role: string): RegistryEntry[] {
+    return Array.from(_map.values()).filter((e) => e.role === role);
+  },
+
+  /**
    * Remove an instance entirely — delete from in-memory map and Redis.
    */
   async deregister(instanceId: string): Promise<void> {

@@ -29,11 +29,23 @@ export interface PingInput {
 
 // ── Tool output types ────────────────────────────────────────────────────────
 
-export interface SendMessageResult {
+/** Result for a direct send_message (single recipient). */
+export interface SendMessageDirectResult {
   messageId: string;
   queued: boolean;
   warning?: string;
 }
+
+/** Result for a role-routed send_message (to: "role:<name>"). */
+export interface SendMessageRoleResult {
+  role: string;
+  recipients: string[];
+  delivered: number;
+  queued: number;
+  warning?: string;
+}
+
+export type SendMessageResult = SendMessageDirectResult | SendMessageRoleResult;
 
 export interface BroadcastResult {
   delivered: number;

@@ -35,6 +35,16 @@ the monorepo version advances with hub/plugin/dashboard releases.
 ## [Unreleased]
 
 ### Added
+- Role-based routing: `send_message({ to: "role:<name>", ... })` fans out to all instances with that role — each recipient gets a unique envelope, offline instances are queued, returns `{ role, recipients, delivered, queued }`
+- Network Graph dashboard page (`/graph`): canvas-based force-directed visualization of instance message flows — nodes colored by online/offline status, edge thickness proportional to message count, directional arrowheads, drag-to-pin, hover tooltips with per-instance sent/recv counts
+- `ENHANCEMENTS.md` — ranked roadmap of 18 planned features
+
+### Changed
+- Dashboard nav: added **Graph** tab with Network icon
+- `send_message` result type is now a discriminated union (`SendMessageDirectResult | SendMessageRoleResult`) to accommodate role fan-out responses
+
+---
+
 - Topics pub/sub system: named channels with persistent delivery and auto-joined project topics
 - `publish_topic` MCP tool and REST endpoint
 - `subscribe_topic` / `unsubscribe_topic` MCP tools

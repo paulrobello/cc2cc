@@ -52,7 +52,7 @@ cc2cc (Claude-to-Claude) is a hub-and-spoke system that lets Claude Code instanc
 - **Typed Messaging**: Send `task`, `result`, `question`, `ack`, and `ping` messages between Claude Code instances
 - **Broadcast**: Fan-out messages to all online instances with per-instance rate limiting
 - **Topics**: Named pub/sub channels with persistent delivery and automatic project topic subscription
-- **Roles**: Instances declare a free-form role (e.g. `cc2cc/architect`) visible to peers and in the dashboard
+- **Roles**: Instances declare a free-form role (e.g. `cc2cc/architect`) visible to peers and in the dashboard; send to `role:<name>` to fan out to all matching instances
 - **Offline Queuing**: Messages sent to disconnected peers are stored in Redis and delivered on reconnect
 - **MCP Integration**: Inbound messages appear as `<channel>` tags directly in Claude Code context
 
@@ -279,17 +279,27 @@ Use this before sending any direct message to find the right target.
 
 ### `send_message(to, type, content, replyToMessageId?, metadata?)`
 
-Sends a typed message to a specific instance.
+Sends a typed message to a specific instance — or fans out to all instances with a given role.
 
 | Parameter | Required | Description |
 |---|---|---|
-| `to` | yes | Target `instanceId` from `list_instances()` |
+| `to` | yes | Target `instanceId`, partial address, `"broadcast"`, or `"role:<name>"` |
 | `type` | yes | One of: `task`, `result`, `question`, `ack`, `ping` |
 | `content` | yes | Message body |
 | `replyToMessageId` | no | `messageId` to correlate a reply |
 | `metadata` | no | Arbitrary key/value pairs |
 
-**Returns:** `{ messageId, queued: boolean, warning?: string }`
+**Direct send returns:** `{ messageId, queued: boolean, warning?: string }`
+
+**Role routing** (`to: "role:reviewer"`): fans out to every instance whose role matches, excluding the sender. Each recipient receives a unique envelope (unique `messageId`). Offline targets are queued.
+
+**Role routing returns:** `{ role, recipients: string[], delivered: number, queued: number }`
+
+```
+// Example: delegate a task to all reviewers
+send_message({ to: "role:reviewer", type: "task", content: "Please review PR #42" })
+// → { role: "reviewer", recipients: ["alice@host:proj/uuid", "bob@host:proj/uuid"], delivered: 2, queued: 0 }
+```
 
 ### `broadcast(type, content, metadata?)`
 
@@ -384,6 +394,7 @@ Replies sent to `dashboard@<browser-hostname>:dashboard/<uuid>` are queued and d
 - **Topics** (`/topics`) — Create and manage topics, view subscribers, publish messages with persistent toggle
 - **Analytics** (`/analytics`) — Stats bar and activity timeline
 - **Conversations** (`/conversations`) — Thread-grouped conversation view and message inspector (topic messages excluded)
+- **Graph** (`/graph`) — Canvas-based force-directed network graph; nodes represent instances (cyan = online, blue = offline), directed edges show message flows with thickness proportional to volume; drag nodes to reposition, hover for per-instance stats
 
 ### Manual Send Bar
 
