@@ -147,7 +147,7 @@ const queueMock = {
   atomicFlushOne: mock(async (instanceId: string) => {
     const q = queueMessages.get(instanceId);
     if (!q || q.length === 0) return null;
-    const message = q.pop()!;
+    const message = q.pop() as Message;
     const raw = JSON.stringify(message);
     return { message, raw };
   }),
@@ -243,7 +243,6 @@ const {
   onDashboardOpen,
   onDashboardClose,
   dashboardClients,
-  broadcastManager,
 } = await import("../src/ws-handler.js");
 
 // ── Helpers ────────────────────────────────────────────────────────────────────

@@ -13,9 +13,7 @@ describe("MessageType enum", () => {
 	});
 
 	it("does not include broadcast as a type value", () => {
-		expect(
-			(MessageType as Record<string, string>)["broadcast"],
-		).toBeUndefined();
+		expect((MessageType as Record<string, string>).broadcast).toBeUndefined();
 	});
 });
 

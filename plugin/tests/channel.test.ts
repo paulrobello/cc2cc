@@ -2,13 +2,33 @@
 import { describe, it, expect, mock } from "bun:test";
 import type { Message } from "@cc2cc/shared";
 import { MessageType } from "@cc2cc/shared";
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+
+/** Shape of the notification call argument passed to mcp.notification() */
+interface NotificationCall {
+  method: string;
+  params: {
+    content: string;
+    meta: Record<string, string>;
+  };
+}
+
+function createFakeServer() {
+  const notificationSpy = mock(async (_params: unknown) => {});
+  const fakeServer: Pick<Server, "notification"> = {
+    notification: notificationSpy,
+  };
+  return { fakeServer, notificationSpy };
+}
+
+function getCall(spy: ReturnType<typeof mock>): NotificationCall {
+  return spy.mock.calls[0][0] as NotificationCall;
+}
 
 describe("emitChannelNotification", () => {
   it("calls mcp.notification with notifications/claude/channel method", async () => {
     const { emitChannelNotification } = await import("../src/channel.ts");
-
-    const notificationSpy = mock(async (_params: unknown) => {});
-    const fakeServer = { notification: notificationSpy } as any;
+    const { fakeServer, notificationSpy } = createFakeServer();
 
     const msg: Message = {
       messageId: "550e8400-e29b-41d4-a716-446655440000",
@@ -22,15 +42,13 @@ describe("emitChannelNotification", () => {
     await emitChannelNotification(fakeServer, msg);
 
     expect(notificationSpy).toHaveBeenCalledTimes(1);
-    const call = notificationSpy.mock.calls[0][0] as any;
+    const call = getCall(notificationSpy);
     expect(call.method).toBe("notifications/claude/channel");
   });
 
   it("sets params.content to message.content", async () => {
     const { emitChannelNotification } = await import("../src/channel.ts");
-
-    const notificationSpy = mock(async (_params: unknown) => {});
-    const fakeServer = { notification: notificationSpy } as any;
+    const { fakeServer, notificationSpy } = createFakeServer();
 
     const msg: Message = {
       messageId: "550e8400-e29b-41d4-a716-446655440001",
@@ -43,15 +61,13 @@ describe("emitChannelNotification", () => {
 
     await emitChannelNotification(fakeServer, msg);
 
-    const call = notificationSpy.mock.calls[0][0] as any;
+    const call = getCall(notificationSpy);
     expect(call.params.content).toBe("Auth module looks good");
   });
 
   it("sets all required meta fields with identifier keys (no hyphens)", async () => {
     const { emitChannelNotification } = await import("../src/channel.ts");
-
-    const notificationSpy = mock(async (_params: unknown) => {});
-    const fakeServer = { notification: notificationSpy } as any;
+    const { fakeServer, notificationSpy } = createFakeServer();
 
     const msg: Message = {
       messageId: "550e8400-e29b-41d4-a716-446655440002",
@@ -65,7 +81,7 @@ describe("emitChannelNotification", () => {
 
     await emitChannelNotification(fakeServer, msg);
 
-    const call = notificationSpy.mock.calls[0][0] as any;
+    const call = getCall(notificationSpy);
     const meta = call.params.meta;
 
     // source must identify the plugin
@@ -84,9 +100,7 @@ describe("emitChannelNotification", () => {
 
   it("sets reply_to to empty string when replyToMessageId is absent", async () => {
     const { emitChannelNotification } = await import("../src/channel.ts");
-
-    const notificationSpy = mock(async (_params: unknown) => {});
-    const fakeServer = { notification: notificationSpy } as any;
+    const { fakeServer, notificationSpy } = createFakeServer();
 
     const msg: Message = {
       messageId: "550e8400-e29b-41d4-a716-446655440003",
@@ -100,7 +114,7 @@ describe("emitChannelNotification", () => {
 
     await emitChannelNotification(fakeServer, msg);
 
-    const call = notificationSpy.mock.calls[0][0] as any;
+    const call = getCall(notificationSpy);
     expect(call.params.meta.reply_to).toBe("");
   });
 });

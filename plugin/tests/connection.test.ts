@@ -1,5 +1,5 @@
 // plugin/tests/connection.test.ts
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { WebSocketServer } from "ws";
 
 // A minimal in-process mock hub to test reconnect behaviour
@@ -39,7 +39,7 @@ async function startMockHub(port: number): Promise<{
 
 describe("HubConnection", () => {
   it("connects to the hub URL and emits open event", async () => {
-    const { wss, close } = await startMockHub(19001);
+    const { close } = await startMockHub(19001);
 
     try {
       const { HubConnection } = await import("../src/connection.ts");
@@ -75,7 +75,9 @@ describe("HubConnection", () => {
         conn.on("open", () => {
           clearTimeout(timeout);
           // Send a frame from the server to the client
-          wss.clients.forEach((ws) => ws.send(JSON.stringify({ type: "ping" })));
+          wss.clients.forEach((ws) => {
+            ws.send(JSON.stringify({ type: "ping" }));
+          });
           resolve();
         });
         conn.connect();
@@ -138,7 +140,7 @@ describe("HubConnection", () => {
   });
 
   it("send() transmits a JSON frame over the WebSocket", async () => {
-    const { wss, receivedMessages, close } = await startMockHub(19004);
+    const { receivedMessages, close } = await startMockHub(19004);
 
     try {
       const { HubConnection } = await import("../src/connection.ts");

@@ -1,6 +1,6 @@
 // hub/src/ws-handler.ts
 import type { ServerWebSocket } from "bun";
-import type { Message, MessageType } from "@cc2cc/shared";
+import type { Message } from "@cc2cc/shared";
 import {
   SendMessageInputSchema,
   BroadcastInputSchema,

@@ -3,6 +3,16 @@ import { describe, it, expect, mock } from "bun:test";
 import { WebSocketServer } from "ws";
 import { MessageType } from "@cc2cc/shared";
 import type { Message } from "@cc2cc/shared";
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+
+/** Shape of the notification call argument passed to mcp.notification() */
+interface NotificationCall {
+  method: string;
+  params: {
+    content: string;
+    meta: Record<string, string>;
+  };
+}
 
 const INTEGRATION_PORT = 19100;
 
@@ -34,7 +44,9 @@ describe("Plugin integration: hub WS message → channel notification", () => {
       const { emitChannelNotification } = await import("../src/channel.ts");
 
       const notificationSpy = mock(async (_params: unknown) => {});
-      const fakeMcp = { notification: notificationSpy } as any;
+      const fakeMcp: Pick<Server, "notification"> = {
+        notification: notificationSpy,
+      };
 
       const conn = new HubConnection(`ws://127.0.0.1:${INTEGRATION_PORT}`);
       const receivedMessages: Message[] = [];
@@ -68,7 +80,9 @@ describe("Plugin integration: hub WS message → channel notification", () => {
         timestamp: new Date().toISOString(),
       };
 
-      wss.clients.forEach((ws) => ws.send(JSON.stringify(inboundMessage)));
+      for (const ws of wss.clients) {
+        ws.send(JSON.stringify(inboundMessage));
+      }
 
       // Wait for async message handler to complete
       await new Promise<void>((resolve) => setTimeout(resolve, 200));
@@ -76,7 +90,7 @@ describe("Plugin integration: hub WS message → channel notification", () => {
       // Verify the channel notification was emitted
       expect(notificationSpy).toHaveBeenCalledTimes(1);
 
-      const call = notificationSpy.mock.calls[0][0] as any;
+      const call = notificationSpy.mock.calls[0][0] as NotificationCall;
       expect(call.method).toBe("notifications/claude/channel");
       expect(call.params.content).toBe("Please review the auth handler");
       expect(call.params.meta.from).toBe("alice@server:api/xyz");
@@ -98,7 +112,9 @@ describe("Plugin integration: hub WS message → channel notification", () => {
       const { emitChannelNotification } = await import("../src/channel.ts");
 
       const notificationSpy = mock(async (_params: unknown) => {});
-      const fakeMcp = { notification: notificationSpy } as any;
+      const fakeMcp: Pick<Server, "notification"> = {
+        notification: notificationSpy,
+      };
 
       const conn = new HubConnection(`ws://127.0.0.1:${INTEGRATION_PORT + 1}`);
 
@@ -123,7 +139,9 @@ describe("Plugin integration: hub WS message → channel notification", () => {
         requestId: "550e8400-e29b-41d4-a716-000000000001",
         instances: [],
       };
-      wss.clients.forEach((ws) => ws.send(JSON.stringify(ackFrame)));
+      for (const ws of wss.clients) {
+        ws.send(JSON.stringify(ackFrame));
+      }
 
       await new Promise<void>((resolve) => setTimeout(resolve, 200));
 
