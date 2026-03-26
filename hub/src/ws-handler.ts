@@ -1,6 +1,6 @@
 // hub/src/ws-handler.ts
 import type { ServerWebSocket } from "bun";
-import type { HubEvent, Message, MessageType } from "@cc2cc/shared";
+import type { Message, MessageType } from "@cc2cc/shared";
 import {
   SendMessageInputSchema,
   BroadcastInputSchema,
@@ -13,17 +13,15 @@ import {
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { registry } from "./registry.js";
-import { redis } from "./redis.js";
 import { INSTANCE_ID_RE } from "./validation.js";
 import { pushMessage, atomicFlushOne, ackProcessed, getQueueDepth, migrateQueue } from "./queue.js";
-import { BroadcastManager } from "./broadcast.js";
-import { topicManager, parseProject } from "./topic-manager.js";
+import { topicManager } from "./topic-manager.js";
+import { parseProject } from "./utils.js";
 import { keysEqual } from "./auth.js";
+import { WS_OPEN } from "./constants.js";
+import { dashboardClients, emitToDashboards, broadcastManager } from "./event-bus.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-/** WebSocket.OPEN numeric value. The WebSocket global is not available in Bun server context. */
-const WS_OPEN = 1;
 
 /** WS rate limit: max messages per window. */
 const WS_RATE_LIMIT_MAX = 60;
@@ -37,17 +35,42 @@ interface RateLimitEntry {
   windowStart: number;
 }
 
+/** Maximum number of entries the rate limiter map may hold at any time. */
+const RATE_LIMIT_MAP_MAX = 10_000;
+
 /**
  * Per-instanceId message rate limiter.
  * Tracks message counts in a fixed 10-second window.
  * Returns true if the message should be allowed, false if rate-limited.
+ * The map is bounded to RATE_LIMIT_MAP_MAX entries; when the cap is reached,
+ * stale (expired-window) entries are evicted first. If still at cap, the
+ * oldest entry is dropped to prevent unbounded memory growth from spoofed
+ * or never-disconnecting instanceIds.
  */
 const rateLimitMap = new Map<string, RateLimitEntry>();
+
+function evictStaleRateLimitEntries(): void {
+  const now = Date.now();
+  for (const [id, entry] of rateLimitMap) {
+    if (now - entry.windowStart >= WS_RATE_LIMIT_WINDOW_MS) {
+      rateLimitMap.delete(id);
+    }
+  }
+}
 
 function checkRateLimit(instanceId: string): boolean {
   const now = Date.now();
   const entry = rateLimitMap.get(instanceId);
   if (!entry || now - entry.windowStart >= WS_RATE_LIMIT_WINDOW_MS) {
+    // Enforce map size cap before inserting a new entry
+    if (!entry && rateLimitMap.size >= RATE_LIMIT_MAP_MAX) {
+      evictStaleRateLimitEntries();
+      // If still at cap after stale eviction, drop the oldest entry
+      if (rateLimitMap.size >= RATE_LIMIT_MAP_MAX) {
+        const oldestKey = rateLimitMap.keys().next().value;
+        if (oldestKey !== undefined) rateLimitMap.delete(oldestKey);
+      }
+    }
     // Start a new window
     rateLimitMap.set(instanceId, { count: 1, windowStart: now });
     return true;
@@ -58,17 +81,6 @@ function checkRateLimit(instanceId: string): boolean {
   entry.count++;
   return true;
 }
-
-// ── Shared state ──────────────────────────────────────────────────────────────
-
-/** Single BroadcastManager instance shared across all connections. */
-export const broadcastManager = new BroadcastManager();
-
-/**
- * Set of all connected dashboard WebSocket connections.
- * Used to fan-out HubEvent notifications.
- */
-export const dashboardClients = new Set<ServerWebSocket<WsData>>();
 
 // ── WS data attached per connection ──────────────────────────────────────────
 
@@ -109,19 +121,19 @@ function wsError(error: string, requestId?: string | unknown, details?: unknown)
   });
 }
 
-// ── Dashboard broadcast helper ────────────────────────────────────────────────
-
-export function emitToDashboards(event: HubEvent): void {
-  const payload = JSON.stringify(event);
-  for (const ws of dashboardClients) {
-    if (ws.readyState === WS_OPEN) {
-      ws.send(payload);
-    }
-  }
-}
+// Re-export emitToDashboards so existing callers in tests that import from
+// ws-handler.ts continue to resolve without changes.
+export { emitToDashboards, dashboardClients, broadcastManager } from "./event-bus.js";
 
 // ── Plugin connect / disconnect ───────────────────────────────────────────────
 
+/**
+ * Handle a plugin WebSocket connection opening.
+ *
+ * Registers the instance in the registry, flushes any messages that arrived
+ * while it was offline, auto-joins its project topic, and emits
+ * `instance:joined` to all dashboard clients.
+ */
 export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
   const { instanceId } = ws.data;
   if (!instanceId) {
@@ -191,6 +203,13 @@ async function flushPendingQueue(instanceId: string, ws: ServerWebSocket<WsData>
   registry.setQueueDepth(instanceId, depth);
 }
 
+/**
+ * Handle a plugin WebSocket connection closing.
+ *
+ * Marks the instance offline in the registry, removes it from the broadcast
+ * manager, cleans up its rate-limiter entry, and emits `instance:left` to
+ * all dashboard clients.
+ */
 export async function onPluginClose(ws: ServerWebSocket<WsData>): Promise<void> {
   const { instanceId } = ws.data;
   if (!instanceId) return;
@@ -212,6 +231,15 @@ export async function onPluginClose(ws: ServerWebSocket<WsData>): Promise<void> 
 
 // ── Plugin message handling ───────────────────────────────────────────────────
 
+/**
+ * Dispatch an incoming WS frame from a plugin to the appropriate action handler.
+ *
+ * Enforces per-connection rate limiting (60 msg / 10 s) before parsing.
+ * Routes on the `action` field: `send_message` (direct, role, or broadcast),
+ * `broadcast`, `get_messages`, `session_update`, `set_role`,
+ * `subscribe_topic`, `unsubscribe_topic`, `publish_topic`.
+ * Unknown actions receive a structured error response.
+ */
 export async function onPluginMessage(
   ws: ServerWebSocket<WsData>,
   rawData: string | Buffer,
@@ -408,7 +436,7 @@ async function handleRoleSend(
       messageId: randomUUID(),
       from: fromInstanceId,
       to: target.instanceId,
-      type: type as MessageType,
+      type,
       content,
       replyToMessageId,
       metadata,
@@ -465,7 +493,7 @@ async function handleBroadcast(
   }
 
   const { type, content, metadata } = parseResult.data;
-  const result = broadcastManager.broadcast(fromInstanceId, type as MessageType, content, metadata);
+  const result = broadcastManager.broadcast(fromInstanceId, type, content, metadata);
 
   if (result.rateLimited) {
     ws.send(
@@ -482,7 +510,7 @@ async function handleBroadcast(
     event: "broadcast:sent",
     from: fromInstanceId,
     content,
-    type: type as string,
+    type,
     timestamp: new Date().toISOString(),
   });
 
@@ -523,6 +551,56 @@ async function handleGetMessages(
 
 // ── Session update handler ───────────────────────────────────────────────────
 
+/**
+ * Swap the in-memory registry and broadcast-manager state from oldId to newId.
+ * Registers new identity BEFORE deregistering old (SEC-012 race-condition fix).
+ */
+async function migrateRegistration(
+  ws: ServerWebSocket<WsData>,
+  oldInstanceId: string,
+  newInstanceId: string,
+): Promise<void> {
+  const project = parseProject(newInstanceId);
+  await registry.register(newInstanceId, project);
+  ws.data.instanceId = newInstanceId;
+  registry.setWsRef(newInstanceId, ws);
+  broadcastManager.addPluginWs(newInstanceId, ws);
+  // Deregister old identity only after new one is live
+  registry.markOffline(oldInstanceId);
+  registry.setWsRef(oldInstanceId, null);
+  broadcastManager.removePluginWs(oldInstanceId);
+}
+
+/**
+ * Re-join the project topic for the new instance, emitting topic HubEvents,
+ * and push a subscriptions:sync frame to the plugin.
+ */
+async function syncTopicsAfterSession(
+  ws: ServerWebSocket<WsData>,
+  newInstanceId: string,
+): Promise<void> {
+  const project = parseProject(newInstanceId);
+  const isNewTopic = !(await topicManager.topicExists(project));
+  await topicManager.createTopic(project, newInstanceId);
+  if (isNewTopic) {
+    emitToDashboards({
+      event: "topic:created",
+      name: project,
+      createdBy: newInstanceId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+  await topicManager.subscribe(project, newInstanceId);
+  emitToDashboards({
+    event: "topic:subscribed",
+    name: project,
+    instanceId: newInstanceId,
+    timestamp: new Date().toISOString(),
+  });
+  const topics = await topicManager.getTopicsForInstance(newInstanceId);
+  ws.send(JSON.stringify({ action: "subscriptions:sync", topics }));
+}
+
 async function handleSessionUpdate(
   ws: ServerWebSocket<WsData>,
   oldInstanceId: string,
@@ -541,7 +619,6 @@ async function handleSessionUpdate(
 
   const { newInstanceId, requestId } = parseResult.data;
 
-  // Validate new instance ID format
   if (!INSTANCE_ID_RE.test(newInstanceId)) {
     ws.send(
       JSON.stringify({
@@ -552,30 +629,18 @@ async function handleSessionUpdate(
     return;
   }
 
-  // Migrate queued messages from old ID to new ID
+  // Step 1: Migrate queued messages
   const migrated = await migrateQueue(oldInstanceId, newInstanceId);
 
-  // SEC-012: Register new identity BEFORE deregistering old to eliminate the
-  // window where neither identity is reachable (race condition fix).
-  const project = parseProject(newInstanceId);
-  await registry.register(newInstanceId, project);
-  ws.data.instanceId = newInstanceId;
-  registry.setWsRef(newInstanceId, ws);
-  broadcastManager.addPluginWs(newInstanceId, ws);
+  // Step 2: Swap registry / broadcast-manager registration
+  await migrateRegistration(ws, oldInstanceId, newInstanceId);
 
-  // Now safely deregister the old identity
-  registry.markOffline(oldInstanceId);
-  registry.setWsRef(oldInstanceId, null);
-  broadcastManager.removePluginWs(oldInstanceId);
-
-  // Notify dashboards that the old session is gone
+  // Step 3: Notify dashboards
   emitToDashboards({
     event: "instance:left",
     instanceId: oldInstanceId,
     timestamp: new Date().toISOString(),
   });
-
-  // Emit session_updated event to dashboards
   emitToDashboards({
     event: "instance:session_updated",
     oldInstanceId,
@@ -584,41 +649,11 @@ async function handleSessionUpdate(
     timestamp: new Date().toISOString(),
   });
 
-  // Migrate topic subscriptions to new instanceId
-  const topicNames = await topicManager.getTopicsForInstance(oldInstanceId);
-  for (const name of topicNames) {
-    await redis.srem(`topic:${name}:subscribers`, oldInstanceId);
-    await redis.sadd(`topic:${name}:subscribers`, newInstanceId);
-  }
-  // SUNIONSTORE: union so any pre-existing newId subscriptions are preserved
-  await redis.sunionstore(
-    `instance:${newInstanceId}:topics`,
-    `instance:${newInstanceId}:topics`,
-    `instance:${oldInstanceId}:topics`,
-  );
-  await redis.del(`instance:${oldInstanceId}:topics`);
-  // Re-run auto-join for project topic (idempotent); `project` already derived from newInstanceId above
-  const isNewTopicOnUpdate = !(await topicManager.topicExists(project));
-  await topicManager.createTopic(project, newInstanceId);
-  if (isNewTopicOnUpdate) {
-    emitToDashboards({
-      event: "topic:created",
-      name: project,
-      createdBy: newInstanceId,
-      timestamp: new Date().toISOString(),
-    });
-  }
-  await topicManager.subscribe(project, newInstanceId);
-  emitToDashboards({
-    event: "topic:subscribed",
-    name: project,
-    instanceId: newInstanceId,
-    timestamp: new Date().toISOString(),
-  });
-  const newTopics = await topicManager.getTopicsForInstance(newInstanceId);
-  ws.send(JSON.stringify({ action: "subscriptions:sync", topics: newTopics }));
+  // Step 4: Migrate topic subscriptions and re-join project topic
+  await topicManager.migrateSubscriptions(oldInstanceId, newInstanceId);
+  await syncTopicsAfterSession(ws, newInstanceId);
 
-  // Ack back to the plugin over the current (old) WS
+  // Step 5: Ack back to the plugin
   ws.send(JSON.stringify({ requestId, migrated }));
 
   console.log(
@@ -656,7 +691,7 @@ async function handleSetRole(
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    ws.send(JSON.stringify({ requestId, error: (err as Error).message }));
+    ws.send(JSON.stringify({ requestId, error: err instanceof Error ? err.message : String(err) }));
   }
 }
 
@@ -688,7 +723,7 @@ async function handleSubscribeTopic(
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    ws.send(JSON.stringify({ requestId, error: (err as Error).message }));
+    ws.send(JSON.stringify({ requestId, error: err instanceof Error ? err.message : String(err) }));
   }
 }
 
@@ -720,7 +755,7 @@ async function handleUnsubscribeTopic(
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    ws.send(JSON.stringify({ requestId, error: (err as Error).message }));
+    ws.send(JSON.stringify({ requestId, error: err instanceof Error ? err.message : String(err) }));
     // Do NOT emit HubEvent on rejection
   }
 }
@@ -751,7 +786,7 @@ async function handlePublishTopic(
     messageId: randomUUID(),
     from: instanceId,
     to: `topic:${topic}`,
-    type: type as MessageType,
+    type,
     content,
     topicName: topic,
     metadata,
@@ -780,21 +815,34 @@ async function handlePublishTopic(
 
 // ── Dashboard connect / disconnect ───────────────────────────────────────────
 
+/**
+ * Handle a dashboard WebSocket connection opening.
+ * Adds the connection to the dashboardClients set so it receives all HubEvent fan-outs.
+ */
 export function onDashboardOpen(ws: ServerWebSocket<WsData>): void {
   dashboardClients.add(ws);
   console.log(`[ws] dashboard connected (${dashboardClients.size} total)`);
 }
 
+/**
+ * Handle a dashboard WebSocket connection closing.
+ * Removes the connection from the dashboardClients set.
+ */
 export function onDashboardClose(ws: ServerWebSocket<WsData>): void {
   dashboardClients.delete(ws);
   console.log(`[ws] dashboard disconnected (${dashboardClients.size} remaining)`);
 }
 
+/**
+ * Handle an unexpected inbound frame on the dashboard WebSocket.
+ *
+ * The `/ws/dashboard` connection is a server-to-browser event stream only.
+ * The dashboard sends messages via its `/ws/plugin` identity. Any frame
+ * received here is unexpected and is logged then silently dropped.
+ */
 export function onDashboardMessage(_ws: ServerWebSocket<WsData>, rawData: string | Buffer): void {
   // The /ws/dashboard connection is an event-stream only — the dashboard sends messages
   // via its separate /ws/plugin identity instead. Unexpected frames here are ignored.
-  console.warn(
-    "[ws] Dashboard sent unexpected message (ignored):",
-    rawData.toString().slice(0, 200),
-  );
+  const frameLength = typeof rawData === "string" ? rawData.length : rawData.byteLength;
+  console.warn(`[ws] Dashboard sent unexpected message (ignored): ${frameLength} bytes`);
 }

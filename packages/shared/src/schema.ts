@@ -2,20 +2,23 @@
 import { z } from "zod";
 import { MessageType } from "./types.js";
 
+/** Internal schema for validating MessageType enum values via Zod. */
 const MessageTypeSchema = z.nativeEnum(MessageType);
 
+/** Zod schema for a full Message envelope as stored in Redis and sent over WebSocket. */
 export const MessageSchema = z.object({
 	messageId: z.string().uuid(),
-	from: z.string().min(1),
-	to: z.string().min(1), // instanceId, 'broadcast', or 'topic:<name>'
+	from: z.string().min(1).max(256),
+	to: z.string().min(1).max(256), // instanceId, 'broadcast', or 'topic:<name>'
 	type: MessageTypeSchema,
 	content: z.string().min(1),
-	topicName: z.string().optional(),
+	topicName: z.string().max(64).optional(),
 	replyToMessageId: z.string().uuid().optional(),
 	metadata: z.record(z.unknown()).optional(),
 	timestamp: z.string().datetime(),
 });
 
+/** Zod schema for an InstanceInfo record returned by the registry and list_instances tool. */
 export const InstanceInfoSchema = z.object({
 	instanceId: z.string().min(1),
 	project: z.string().min(1),
@@ -47,7 +50,7 @@ const MetadataSchema = z
 
 /** Input schema for the send_message MCP tool */
 export const SendMessageInputSchema = z.object({
-	to: z.string().min(1),
+	to: z.string().min(1).max(256),
 	type: MessageTypeSchema,
 	content: z.string().min(1).max(MAX_CONTENT_BYTES),
 	replyToMessageId: z.string().uuid().optional(),
@@ -69,9 +72,15 @@ export const GetMessagesInputSchema = z.object({
 /**
  * Instance ID format: username@host:project/session
  * Allows alphanumeric, dots, underscores, hyphens. Project ≤64 chars, session ≤64 chars.
+ *
+ * Exported so hub/src/validation.ts and any other consumer can import the
+ * single canonical pattern instead of maintaining independent copies.
  */
-const INSTANCE_ID_PATTERN =
+export const INSTANCE_ID_RE =
 	/^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]{1,64}\/[a-zA-Z0-9-]{1,64}$/;
+
+/** @deprecated Use INSTANCE_ID_RE — kept as an internal alias so the Zod schema below compiles unchanged. */
+const INSTANCE_ID_PATTERN = INSTANCE_ID_RE;
 
 /** Schema for the WS action frame the plugin sends to the hub when the session ID changes */
 export const SessionUpdateActionSchema = z.object({
@@ -86,27 +95,32 @@ export const SessionUpdateActionSchema = z.object({
 	requestId: z.string().uuid(),
 });
 
+/** Zod schema for a TopicInfo record returned by list_topics. */
 export const TopicInfoSchema = z.object({
-	name: z.string().min(1),
+	name: z.string().min(1).max(64),
 	createdAt: z.string().datetime(),
-	createdBy: z.string().min(1),
+	createdBy: z.string().min(1).max(256),
 	subscriberCount: z.number().int().min(0),
 });
 
+/** Input schema for the set_role MCP tool. */
 export const SetRoleInputSchema = z.object({
-	role: z.string().min(1),
+	role: z.string().min(1).max(64),
 });
 
+/** Input schema for the subscribe_topic MCP tool. */
 export const SubscribeTopicInputSchema = z.object({
-	topic: z.string().min(1),
+	topic: z.string().min(1).max(64),
 });
 
+/** Input schema for the unsubscribe_topic MCP tool. */
 export const UnsubscribeTopicInputSchema = z.object({
-	topic: z.string().min(1),
+	topic: z.string().min(1).max(64),
 });
 
+/** Input schema for the publish_topic MCP tool. */
 export const PublishTopicInputSchema = z.object({
-	topic: z.string().min(1),
+	topic: z.string().min(1).max(64),
 	type: MessageTypeSchema,
 	content: z.string().min(1).max(MAX_CONTENT_BYTES),
 	persistent: z.boolean().default(false),

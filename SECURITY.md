@@ -97,9 +97,9 @@ The hub validates message content at the Zod schema level, but does not enforce 
 
 **Mitigation:** Run the hub on a machine with sufficient memory for the expected workload. The queue hard cap (1000 messages per instance) provides an upper bound on Redis memory usage under normal operation.
 
-### Topic name injection (pre-v0.2.2)
+### Topic name injection (fixed in v0.2.1)
 
-Versions prior to the `validateTopicName` fix allowed arbitrary topic names to be used as Redis key segments, enabling key namespace collisions. Versions with `validateTopicName` in `topic-manager.ts` restrict topic names to `[a-z0-9][a-z0-9_-]{0,63}`.
+Versions prior to v0.2.1 allowed arbitrary topic names to be used as Redis key segments, enabling key namespace collisions. As of v0.2.1, `validateTopicName` in `topic-manager.ts` restricts topic names to `[a-z0-9][a-z0-9_-]{0,63}` before any Redis key construction.
 
 ---
 

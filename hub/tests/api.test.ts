@@ -82,10 +82,12 @@ mock.module("../src/topic-manager.js", () => ({
   validateTopicName: (_name: unknown) => null, // null = valid; tests don't exercise validation
 }));
 
-// Mock ws-handler (api.ts calls emitToDashboards)
-mock.module("../src/ws-handler.js", () => ({
+// Mock event-bus (api.ts imports emitToDashboards from event-bus.js after ARC-003 refactor)
+// The ws-handler.js mock is removed — api.ts no longer imports from ws-handler.js.
+mock.module("../src/event-bus.js", () => ({
   emitToDashboards: mock(() => {}),
   dashboardClients: new Set(),
+  broadcastManager: { addPluginWs: () => {}, removePluginWs: () => {}, broadcast: () => ({}) },
 }));
 
 const { buildApiRoutes } = await import("../src/api.js");

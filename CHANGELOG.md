@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Version Note](#version-note)
 - [Unreleased](#unreleased)
 - [0.2.2 — skill](#022--skill)
+- [0.2.1 — hub/plugin/dashboard](#021--hubplugindashboard)
 - [0.1.0 — monorepo](#010--monorepo)
 
 ---
@@ -37,14 +38,54 @@ the monorepo version advances with hub/plugin/dashboard releases.
 ### Added
 - Role-based routing: `send_message({ to: "role:<name>", ... })` fans out to all instances with that role — each recipient gets a unique envelope, offline instances are queued, returns `{ role, recipients, delivered, queued }`
 - Network Graph dashboard page (`/graph`): canvas-based force-directed visualization of instance message flows — nodes colored by online/offline status, edge thickness proportional to message count, directional arrowheads, drag-to-pin, hover tooltips with per-instance sent/recv counts
-- `ENHANCEMENTS.md` — ranked roadmap of 18 planned features
 
 ### Changed
 - Dashboard nav: added **Graph** tab with Network icon
 - `send_message` result type is now a discriminated union (`SendMessageDirectResult | SendMessageRoleResult`) to accommodate role fan-out responses
 
+### Security
+- **BFF proxy pattern**: Dashboard API calls now route through Next.js server-side proxy routes — API key no longer embedded in browser bundle or exposed as `NEXT_PUBLIC_` env var
+- Constrained all Zod schema input lengths: role/topic max 64, message `to`/`from` max 256, `topicName` max 64
+- CORS default changed from `*` to `http://localhost:8029`; `unsafe-eval` gated behind dev mode
+- Pinned Docker base images to `oven/bun:1.1.38`; added `Permissions-Policy` and `Strict-Transport-Security` headers
+- `keysEqual` now pads buffers before `timingSafeEqual` to eliminate length oracle
+- Rate limiter map bounded to 10K entries with stale eviction
+- Dashboard WS logs frame byte-length only (no raw content); `/health` returns minimal `{ status: "ok" }`
+- Redis password in docker-compose now requires explicit `CC2CC_REDIS_PASSWORD` env var
+- Installed `check-secrets.sh` as pre-commit hook
+
+### Fixed
+- Extracted `event-bus.ts` to break circular import between `api.ts` and `ws-handler.ts`
+- Consolidated `WS_OPEN` constant into `hub/src/constants.ts` (was duplicated in 3 files)
+- Consolidated `INSTANCE_ID_RE` regex into `@cc2cc/shared` (was duplicated in shared + hub)
+- Replaced N+1 Redis queries in `listTopics` with pipelined batch; added combined `GET /api/topics?includeSubscribers=true` endpoint to eliminate N+1 HTTP from dashboard
+- `config.ts` throws `ConfigurationError` instead of calling `process.exit(1)` at import time
+- Replaced 13 unsafe `(err as Error).message` casts with `instanceof` guards
+- Plugin fetch calls now include `AbortSignal.timeout(10_000)`
+- Exported `parseProject` and `toHttpUrl` from `@cc2cc/shared` — eliminated duplicate implementations
+- Session migration uses `topicManager.migrateSubscriptions()` instead of direct Redis calls
+- Fixed stale closure in `useReconnectingWs` via `optsRef`; removed non-null canvas assertion in graph page
+- `BroadcastSentEventSchema.type` now uses `z.nativeEnum(MessageType)` instead of loose `z.string()`
+- Batched Redis INCR + EXPIREAT in `pushMessage` into pipeline
+
+### Documentation
+- Added `CC2CC_DASHBOARD_ORIGIN` to README env table
+- Created `docs/README.md` documentation index
+- Added JSDoc to ws-handler exports, shared schemas, shared types, session-watcher module
+- Fixed CONTRIBUTING.md cross-references and link paths
+- Replaced duplicate REST API table in ARCHITECTURE.md with summary + link
+- Assigned orphaned CHANGELOG entries to v0.2.1; removed planning doc from changelog
+- Marked shipped items in ENHANCEMENTS.md; added Roadmap link in README
+- Stripped version numbers from README badges; added CI placeholder badge
+
+### Tests
+- Added 38 unit tests for `ws-handler.ts` covering all action handlers, auth, rate limiting, and lifecycle events
+
 ---
 
+## [0.2.1] — hub/plugin/dashboard
+
+### Added
 - Topics pub/sub system: named channels with persistent delivery and auto-joined project topics
 - `publish_topic` MCP tool and REST endpoint
 - `subscribe_topic` / `unsubscribe_topic` MCP tools
@@ -138,6 +179,7 @@ the monorepo version advances with hub/plugin/dashboard releases.
 - `SessionStart` hook writes Claude session ID to `.claude/.cc2cc-session-id` for stable instance identity
 - Partial addressing: send to `username@host:project` without session segment
 
-[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.2.1...HEAD
 [0.2.2]: https://github.com/paulrobello/cc2cc/releases/tag/skill-v0.2.2
+[0.2.1]: https://github.com/paulrobello/cc2cc/compare/v0.1.0...v0.2.1
 [0.1.0]: https://github.com/paulrobello/cc2cc/releases/tag/v0.1.0

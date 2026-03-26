@@ -1,27 +1,15 @@
 // plugin/src/tools.ts
 import type { InstanceInfo, Message, MessageType, TopicInfo } from "@cc2cc/shared";
+// Import shared input types to avoid duplication (ARC-011)
+import type { SendMessageInput, BroadcastInput, GetMessagesInput } from "@cc2cc/shared";
 import type { PluginConfig } from "./config.js";
 import type { HubConnection } from "./connection.js";
 
+// Re-export shared input types so callers that previously imported from this
+// module continue to resolve (ARC-011).
+export type { SendMessageInput, BroadcastInput, GetMessagesInput } from "@cc2cc/shared";
+
 // ── Tool input types ─────────────────────────────────────────────────────────
-
-export interface SendMessageInput {
-  to: string;
-  type: MessageType;
-  content: string;
-  replyToMessageId?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface BroadcastInput {
-  type: MessageType;
-  content: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface GetMessagesInput {
-  limit?: number;
-}
 
 export interface PingInput {
   to: string;
@@ -91,7 +79,9 @@ export function createTools(config: Pick<PluginConfig, "hubUrl" | "apiKey">, con
      * GET /api/instances?key=<apiKey>
      */
     async list_instances(_input: Record<string, never>): Promise<InstanceInfo[]> {
-      const res = await fetch(`${httpHubUrl}/api/instances?key=${encodeURIComponent(apiKey)}`);
+      const res = await fetch(`${httpHubUrl}/api/instances?key=${encodeURIComponent(apiKey)}`, {
+        signal: AbortSignal.timeout(10_000),
+      });
       if (!res.ok) {
         throw new Error(`list_instances failed: ${res.status} ${res.statusText}`);
       }
@@ -165,6 +155,7 @@ export function createTools(config: Pick<PluginConfig, "hubUrl" | "apiKey">, con
     async ping(input: PingInput): Promise<PingResult> {
       const res = await fetch(
         `${httpHubUrl}/api/ping/${encodeURIComponent(input.to)}?key=${encodeURIComponent(apiKey)}`,
+        { signal: AbortSignal.timeout(10_000) },
       );
       if (!res.ok) {
         throw new Error(`ping failed: ${res.status} ${res.statusText}`);
@@ -223,7 +214,9 @@ export function createTools(config: Pick<PluginConfig, "hubUrl" | "apiKey">, con
      * GET /api/topics?key=<apiKey>
      */
     async list_topics(_input: Record<string, never>): Promise<TopicInfo[]> {
-      const res = await fetch(`${httpHubUrl}/api/topics?key=${encodeURIComponent(apiKey)}`);
+      const res = await fetch(`${httpHubUrl}/api/topics?key=${encodeURIComponent(apiKey)}`, {
+        signal: AbortSignal.timeout(10_000),
+      });
       if (!res.ok) throw new Error(`list_topics failed: ${res.status} ${res.statusText}`);
       return res.json() as Promise<TopicInfo[]>;
     },

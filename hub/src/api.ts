@@ -4,13 +4,12 @@ import type { Context, Hono } from "hono";
 import { config } from "./config.js";
 import { registry } from "./registry.js";
 import { getMessagesTodayCount, getTotalQueued, flushQueue } from "./queue.js";
-import { checkRedisHealth } from "./redis.js";
-import { emitToDashboards } from "./ws-handler.js";
+import { emitToDashboards } from "./event-bus.js";
 import { topicManager, validateTopicName } from "./topic-manager.js";
 import { keysEqual } from "./auth.js";
-import type { Message, MessageType } from "@cc2cc/shared";
-
-const startTime = Date.now();
+import { checkRedisHealth } from "./redis.js";
+import { MessageType } from "@cc2cc/shared";
+import type { Message } from "@cc2cc/shared";
 
 /**
  * Validate the API key from a Hono request context.
@@ -45,16 +44,15 @@ function getKey(c: Context): string | undefined {
  * /health is publicly accessible; all other routes require ?key=<CC2CC_HUB_API_KEY>.
  */
 export function buildApiRoutes(app: Hono): void {
-  // GET /health — no auth required; must be publicly accessible
+  // GET /health — no auth required; returns service health status
   app.get("/health", async (c) => {
     const redisOk = await checkRedisHealth();
-    const onlineInstances = registry.getOnline();
-
+    const connectedInstances = registry.getOnline().length;
     return c.json({
       status: "ok",
-      connectedInstances: onlineInstances.length,
+      connectedInstances,
       redisOk,
-      uptime: Math.floor((Date.now() - startTime) / 1000),
+      uptime: process.uptime(),
     });
   });
 
@@ -154,11 +152,18 @@ export function buildApiRoutes(app: Hono): void {
     return c.json({ flushed: true, instanceId });
   });
 
-  // GET /api/topics — list all topics
+  // GET /api/topics — list all topics.
+  // Pass ?includeSubscribers=true to receive subscriber arrays in a single request
+  // instead of making a separate GET /api/topics/:name/subscribers per topic (ARC-008).
   app.get("/api/topics", async (c) => {
     const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
-    return c.json(await topicManager.listTopics());
+    const topics = await topicManager.listTopics();
+    if (c.req.query("includeSubscribers") === "true") {
+      const withSubs = await topicManager.listTopicsWithSubscribers(topics);
+      return c.json(withSubs);
+    }
+    return c.json(topics);
   });
 
   // GET /api/topics/:name/subscribers — get subscribers for a topic
@@ -199,8 +204,8 @@ export function buildApiRoutes(app: Hono): void {
     const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     const name = decodeURIComponent(c.req.param("name"));
-    const nameErrDel = validateTopicName(name);
-    if (nameErrDel) return c.json({ error: nameErrDel }, 400);
+    const nameErr = validateTopicName(name);
+    if (nameErr) return c.json({ error: nameErr }, 400);
     if (!(await topicManager.topicExists(name))) {
       return c.json({ error: "topic not found" }, 404);
     }
@@ -218,8 +223,8 @@ export function buildApiRoutes(app: Hono): void {
     const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     const name = decodeURIComponent(c.req.param("name"));
-    const nameErrSub = validateTopicName(name);
-    if (nameErrSub) return c.json({ error: nameErrSub }, 400);
+    const nameErr = validateTopicName(name);
+    if (nameErr) return c.json({ error: nameErr }, 400);
     if (!(await topicManager.topicExists(name))) {
       return c.json({ error: "topic not found" }, 404);
     }
@@ -242,8 +247,8 @@ export function buildApiRoutes(app: Hono): void {
     const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     const name = decodeURIComponent(c.req.param("name"));
-    const nameErrUnsub = validateTopicName(name);
-    if (nameErrUnsub) return c.json({ error: nameErrUnsub }, 400);
+    const nameErr = validateTopicName(name);
+    if (nameErr) return c.json({ error: nameErr }, 400);
     if (!(await topicManager.topicExists(name))) {
       return c.json({ error: "topic not found" }, 404);
     }
@@ -260,7 +265,7 @@ export function buildApiRoutes(app: Hono): void {
       });
       return c.json({ unsubscribed: true, topic: name });
     } catch (err) {
-      return c.json({ error: (err as Error).message }, 400);
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
   });
 
@@ -269,14 +274,14 @@ export function buildApiRoutes(app: Hono): void {
     const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
     const name = decodeURIComponent(c.req.param("name"));
-    const nameErrPub = validateTopicName(name);
-    if (nameErrPub) return c.json({ error: nameErrPub }, 400);
+    const nameErr = validateTopicName(name);
+    if (nameErr) return c.json({ error: nameErr }, 400);
     if (!(await topicManager.topicExists(name))) {
       return c.json({ error: "topic not found" }, 404);
     }
     const {
       content,
-      type,
+      type: rawType,
       persistent = false,
       metadata,
     } = await c.req.json<{
@@ -286,6 +291,12 @@ export function buildApiRoutes(app: Hono): void {
       metadata?: Record<string, unknown>;
     }>();
 
+    // Validate type against the MessageType enum
+    if (!Object.values(MessageType).includes(rawType as MessageType)) {
+      return c.json({ error: `invalid message type: ${rawType}` }, 400);
+    }
+    const type = rawType as MessageType;
+
     const wsRefs = registry.getOnlineWsRefs();
 
     // SEC-007: Server-stamp `from` as "dashboard" — ignore any client-supplied from field
@@ -293,7 +304,7 @@ export function buildApiRoutes(app: Hono): void {
       messageId: randomUUID(),
       from: "dashboard",
       to: `topic:${name}`,
-      type: type as MessageType,
+      type,
       content,
       topicName: name,
       metadata,

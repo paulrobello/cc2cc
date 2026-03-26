@@ -1,7 +1,7 @@
 // hub/src/index.ts
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { config } from "./config.js";
+import { config, ConfigurationError, validateConfig } from "./config.js";
 import { buildApiRoutes } from "./api.js";
 import { INSTANCE_ID_RE } from "./validation.js";
 import {
@@ -20,6 +20,18 @@ import { redis } from "./redis.js";
 import { replayProcessing } from "./queue.js";
 import { registry } from "./registry.js";
 
+// Validate required configuration at startup (ARC-009).
+// Must be called after all imports so config.ts is fully evaluated.
+try {
+  validateConfig();
+} catch (err) {
+  if (err instanceof ConfigurationError) {
+    process.stderr.write(`${err.message}\n`);
+    process.exit(1);
+  }
+  throw err;
+}
+
 const app = new Hono();
 
 // Security headers for all REST responses
@@ -28,6 +40,8 @@ app.use("*", async (c, next) => {
   c.res.headers.set("X-Content-Type-Options", "nosniff");
   c.res.headers.set("X-Frame-Options", "DENY");
   c.res.headers.set("Referrer-Policy", "no-referrer");
+  c.res.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+  c.res.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
 });
 
 // Allow cross-origin requests from the dashboard.
@@ -191,6 +205,9 @@ process.on("SIGINT", () => {
       );
     }
   } catch (err) {
-    console.error("[hub] startup: initialization scan failed", (err as Error).message);
+    console.error(
+      "[hub] startup: initialization scan failed",
+      err instanceof Error ? err.message : String(err),
+    );
   }
 })();

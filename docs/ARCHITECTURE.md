@@ -300,26 +300,18 @@ Dashboards connect to `/ws/dashboard?key=<KEY>` and receive a stream of `HubEven
 
 ## REST API
 
-All endpoints except `GET /health` require authentication via `Authorization: Bearer <CC2CC_HUB_API_KEY>` header (preferred) or `?key=<CC2CC_HUB_API_KEY>` query param (fallback).
+The hub exposes a REST API on port 3100. All endpoints except `GET /health` require authentication via `Authorization: Bearer <CC2CC_HUB_API_KEY>` header (preferred) or `?key=<CC2CC_HUB_API_KEY>` query param (fallback).
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check — no auth required |
-| `GET` | `/api/instances` | List all registered instances with status and queue depth |
-| `GET` | `/api/stats` | Current message stats (total today, active instances, queued messages) |
-| `GET` | `/api/messages/:id` | Stub — returns 404; use the WS event stream to build a local message index |
-| `GET` | `/api/ping/:id` | Check whether an instance is currently online; returns `{ online, instanceId }` |
-| `DELETE` | `/api/instances/:id` | Remove an offline instance and flush its queue; returns 409 if instance is online |
-| `DELETE` | `/api/queue/:id` | Flush an instance's Redis queue without removing the registry entry |
-| `GET` | `/api/topics` | List all topics with subscriber counts |
-| `POST` | `/api/topics` | Create a topic (idempotent) |
-| `DELETE` | `/api/topics/:name` | Delete a topic; returns 409 if it has subscribers |
-| `GET` | `/api/topics/:name/subscribers` | List subscribers for a topic |
-| `POST` | `/api/topics/:name/subscribe` | Subscribe an instance to a topic |
-| `POST` | `/api/topics/:name/unsubscribe` | Unsubscribe an instance from a topic |
-| `POST` | `/api/topics/:name/publish` | Publish a message to a topic |
+Endpoint groups:
 
-> **Note:** There are no REST endpoints for `send_message` or `broadcast`. All direct message delivery and identity-dependent operations go through the plugin WebSocket connection. `GET /api/ping/:id` is a lightweight online check (no WS identity needed). The Topics API is available via both REST and WS.
+- **Health:** `GET /health` — no auth required
+- **Instances:** list, ping, and remove registered instances
+- **Stats:** message counts and queue depths
+- **Topics:** create, delete, subscribe, unsubscribe, and publish
+
+> **Note:** There are no REST endpoints for `send_message` or `broadcast`. All direct message delivery goes through the plugin WebSocket connection.
+
+For the full endpoint reference with request/response shapes and examples, see [REST_API.md](REST_API.md).
 
 ---
 

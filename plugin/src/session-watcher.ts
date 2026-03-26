@@ -1,3 +1,15 @@
+/**
+ * @module session-watcher
+ *
+ * Watches the Claude Code session-ID file (`.claude/.cc2cc-session-id`) for
+ * changes and triggers a session migration when the ID rotates — typically on
+ * `/clear`. On detection, the watcher sends a `session_update` action to the
+ * hub, updates the plugin config in-place, replaces the WS connection and MCP
+ * tools with the new identity, and notifies the caller via `onReconnect`.
+ *
+ * Uses `fs.watchFile` (poll-based) so it tolerates the file not yet existing
+ * at startup and does not require inotify/kqueue support.
+ */
 // plugin/src/session-watcher.ts
 import fs from "node:fs";
 import path from "node:path";
@@ -68,7 +80,9 @@ export function watchSession(
       callbacks.onReconnect(state, oldConn);
       oldConn.destroy();
     } catch (err) {
-      process.stderr.write(`[cc2cc] session update error: ${(err as Error).message}\n`);
+      process.stderr.write(
+        `[cc2cc] session update error: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
     } finally {
       active = false;
     }

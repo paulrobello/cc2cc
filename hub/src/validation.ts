@@ -1,10 +1,8 @@
 // hub/src/validation.ts
 /**
- * Validates the instanceId format: username@host:project/session
- * Tightened to reject shell metacharacters and control characters that could
- * be injected into Redis keys or log output.
- * Allows alphanumeric, dots, underscores, hyphens in each segment.
- * Project segment: 1–64 chars. Session segment: 1–64 chars.
+ * Re-exports the canonical instanceId regex from @cc2cc/shared.
+ *
+ * Previously this file held an independent copy of the pattern; it now
+ * delegates to the single source of truth so the two can never silently drift.
  */
-export const INSTANCE_ID_RE =
-  /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]{1,64}\/[a-zA-Z0-9-]{1,64}$/;
+export { INSTANCE_ID_RE } from "@cc2cc/shared";

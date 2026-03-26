@@ -1,10 +1,11 @@
 # cc2cc
 
 ![License](https://img.shields.io/github/license/paulrobello/cc2cc)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue)
-![Bun](https://img.shields.io/badge/Bun-1.1+-orange)
-![Redis](https://img.shields.io/badge/Redis-7+-red)
-![Next.js](https://img.shields.io/badge/Next.js-16-black)
+![CI](https://img.shields.io/badge/CI-not%20configured-lightgrey)
+![TypeScript](https://img.shields.io/badge/TypeScript-blue)
+![Bun](https://img.shields.io/badge/Bun-orange)
+![Redis](https://img.shields.io/badge/Redis-red)
+![Next.js](https://img.shields.io/badge/Next.js-black)
 
 ## Table of Contents
 
@@ -133,6 +134,7 @@ make dev-dashboard
 | `CC2CC_PROJECT` | plugin | no | `basename(cwd)` | Identifies this instance's project |
 | `NEXT_PUBLIC_CC2CC_HUB_WS_URL` | dashboard | no | `ws://localhost:3100` | Hub WebSocket URL for the browser |
 | `NEXT_PUBLIC_CC2CC_HUB_API_KEY` | dashboard | no | — | API key for hub REST calls |
+| `CC2CC_DASHBOARD_ORIGIN` | hub | no | `*` | CORS origin for hub responses. Set to your dashboard URL (e.g. `http://192.168.1.10:8029`) to restrict cross-origin access. Defaults to `*` with a warning logged at startup. |
 | `CC2CC_REDIS_PASSWORD` | docker-compose | no | `changeme` | Redis auth password; docker-compose uses it to configure Redis and build `CC2CC_REDIS_URL` for the hub container |
 | `CC2CC_HOST_LAN_IP` | docker-compose | no | `localhost` | LAN IP passed to the dashboard container |
 
@@ -533,9 +535,14 @@ For full architecture details — workspace layout, component responsibilities, 
 * Q: Are messages encrypted?
   * A: No. cc2cc is designed for trusted LAN environments. Do not send credentials or sensitive data through messages.
 
+## Roadmap
+
+Planned features — including `wait_for_reply`, message history, per-instance API keys, and additional dashboard views — are tracked in [ENHANCEMENTS.md](ENHANCEMENTS.md).
+
 ## Related Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) — Detailed system architecture, protocol reference, and design invariants
+- [Documentation Index](docs/README.md) — Guide to all docs in the `docs/` directory
 - [Documentation Style Guide](docs/DOCUMENTATION_STYLE_GUIDE.md) — Standards for all project documentation
 - [cc2cc Skill](skill/skills/cc2cc/SKILL.md) — Full collaboration protocol for Claude Code instances
 - [Task Delegation Pattern](skill/skills/cc2cc/patterns/task-delegation.md) — How to delegate work to peer instances

@@ -24,6 +24,7 @@ function processingKey(instanceId: string): string {
  */
 export async function pushMessage(recipientId: string, message: Message): Promise<number> {
   const key = queueKey(recipientId);
+  // RPUSH first — we need the depth to decide whether to LPOP.
   const depth = await redis.rpush(key, JSON.stringify(message));
   await redis.expire(key, QUEUE_TTL_SECONDS);
 
@@ -31,13 +32,16 @@ export async function pushMessage(recipientId: string, message: Message): Promis
     await redis.lpop(key);
   }
 
-  // Increment today's message counter and set it to expire at midnight UTC
-  await redis.incr("stats:messages:today");
+  // Batch the stat counter increment and its expiry in a single pipeline round-trip
   const now = new Date();
   const midnight = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1),
   );
-  await redis.expireat("stats:messages:today", Math.floor(midnight.getTime() / 1000));
+  await redis
+    .pipeline()
+    .incr("stats:messages:today")
+    .expireat("stats:messages:today", Math.floor(midnight.getTime() / 1000))
+    .exec();
 
   return Math.min(depth, MAX_QUEUE_DEPTH);
 }

@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { HubEventSchema, MessageType } from "@cc2cc/shared";
+import { HubEventSchema, MessageType, parseProject } from "@cc2cc/shared";
 import type {
   ConnectionState,
   FeedMessage,
@@ -17,7 +17,7 @@ import type {
   TopicState,
   WsContextValue,
 } from "@/types/dashboard";
-import { fetchInstances, fetchTopics, fetchTopicSubscribers } from "@/lib/api";
+import { fetchInstances, fetchTopicsWithSubscribers } from "@/lib/api";
 import { useReconnectingWs } from "@/hooks/use-reconnecting-ws";
 import { usePluginWs } from "@/hooks/use-plugin-ws";
 
@@ -62,6 +62,12 @@ export const WsContext = createContext<WsContextValue>({
   },
 });
 
+/** Shape of the response from /api/hub/ws-config */
+interface WsConfig {
+  wsUrl: string;
+  apiKey: string;
+}
+
 export function WsProvider({ children }: { children: React.ReactNode }) {
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("reconnecting");
@@ -83,6 +89,14 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   // Tracks consecutive dashboard WS failures for the disconnect threshold
   const failureCountRef = useRef(0);
 
+  // WS config fetched once from the server-side /api/hub/ws-config endpoint.
+  // The API key is never embedded in the browser bundle — it arrives at runtime
+  // from a server route that reads the server-only CC2CC_HUB_API_KEY env var.
+  const wsConfigRef = useRef<WsConfig>({
+    wsUrl: "ws://localhost:3100",
+    apiKey: "",
+  });
+
   // ── Seed from REST on first load ────────────────────────────────────────────
 
   const seedInstances = useCallback(async () => {
@@ -103,23 +117,18 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const seedTopics = useCallback(async () => {
+    // Single request returns topics + subscriber lists in one round-trip (ARC-008)
     let list;
     try {
-      list = await fetchTopics();
+      list = await fetchTopicsWithSubscribers();
     } catch {
       return; // hub unreachable — degrade gracefully
     }
     if (!mountedRef.current) return;
-    const subsResults = await Promise.all(
-      list.map((t) => fetchTopicSubscribers(t.name)),
-    );
-    if (!mountedRef.current) return;
     setTopics((prev) => {
       const next = new Map(prev);
-      for (let i = 0; i < list.length; i++) {
-        const t = list[i];
-        const subs = subsResults[i];
-        next.set(t.name, { ...t, subscribers: subs });
+      for (const t of list) {
+        next.set(t.name, { ...t });
       }
       return next;
     });
@@ -157,7 +166,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             const existing = next.get(evt.instanceId);
             next.set(evt.instanceId, {
               instanceId: evt.instanceId,
-              project: evt.instanceId.split(":")[1]?.split("/")[0] ?? "",
+              project: parseProject(evt.instanceId),
               status: "online",
               connectedAt: evt.timestamp,
               queueDepth: existing?.queueDepth ?? 0,
@@ -218,7 +227,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
               messageId: crypto.randomUUID(),
               from: evt.from,
               to: "broadcast",
-              type: (evt.type as MessageType | undefined) ?? MessageType.task,
+              type: evt.type ?? MessageType.task,
               content: evt.content,
               timestamp: evt.timestamp,
             },
@@ -315,7 +324,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             // Upsert the new session as online
             next.set(evt.newInstanceId, {
               instanceId: evt.newInstanceId,
-              project: evt.newInstanceId.split(":")[1]?.split("/")[0] ?? "",
+              project: parseProject(evt.newInstanceId),
               status: "online",
               connectedAt: evt.timestamp,
               queueDepth: 0,
@@ -341,7 +350,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
 
   const getDashboardUrl = useCallback(
     () =>
-      `${process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100"}/ws/dashboard?key=${encodeURIComponent(process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "")}`,
+      `${wsConfigRef.current.wsUrl}/ws/dashboard?key=${encodeURIComponent(wsConfigRef.current.apiKey)}`,
     [],
   );
 
@@ -374,7 +383,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
 
   const getPluginUrl = useCallback(
     () =>
-      `${process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100"}/ws/plugin?key=${encodeURIComponent(process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "")}&instanceId=${encodeURIComponent(dashboardInstanceId)}`,
+      `${wsConfigRef.current.wsUrl}/ws/plugin?key=${encodeURIComponent(wsConfigRef.current.apiKey)}&instanceId=${encodeURIComponent(dashboardInstanceId)}`,
     [dashboardInstanceId],
   );
 
@@ -405,29 +414,22 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
       content: string,
       persistent: boolean,
       metadata?: Record<string, unknown>,
-    ): Promise<void> => {
-      const hubHttpUrl = (
-        process.env.NEXT_PUBLIC_CC2CC_HUB_WS_URL ?? "ws://localhost:3100"
-      ).replace(/^wss?:\/\//, (m) => (m === "wss://" ? "https://" : "http://"));
-      const apiKey = process.env.NEXT_PUBLIC_CC2CC_HUB_API_KEY ?? "";
-      return fetch(
-        `${hubHttpUrl}/api/topics/${encodeURIComponent(topic)}/publish?key=${encodeURIComponent(apiKey)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content,
-            type,
-            persistent,
-            metadata,
-            from: dashboardInstanceId,
-          }),
-          signal: AbortSignal.timeout(10_000),
-        },
-      ).then((r) => {
+    ): Promise<void> =>
+      // Route through the BFF proxy — the API key is added server-side.
+      fetch(`/api/hub/topics/${encodeURIComponent(topic)}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content,
+          type,
+          persistent,
+          metadata,
+          from: dashboardInstanceId,
+        }),
+        signal: AbortSignal.timeout(10_000),
+      }).then((r) => {
         if (!r.ok) throw new Error(`publish failed: ${r.status}`);
-      });
-    },
+      }),
     [dashboardInstanceId],
   );
 
@@ -435,13 +437,33 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     mountedRef.current = true;
-    // seedInstances and seedTopics are async — setState fires after promise resolves, guarded by mountedRef.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    seedInstances();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    seedTopics();
-    connectDashboard();
-    connectPlugin();
+
+    // Fetch WS config (URL + API key) from the server-side BFF endpoint before
+    // opening WebSocket connections. This ensures the API key is never baked
+    // into the browser bundle — it is read server-side and delivered at runtime.
+    const init = async () => {
+      try {
+        const res = await fetch("/api/hub/ws-config", {
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (res.ok && mountedRef.current) {
+          const cfg = (await res.json()) as WsConfig;
+          wsConfigRef.current = cfg;
+        }
+      } catch {
+        // Fall through with default config (ws://localhost:3100, empty key)
+      }
+
+      if (!mountedRef.current) return;
+
+      // seedInstances and seedTopics are async — setState fires after promise resolves, guarded by mountedRef.
+      seedInstances();
+      seedTopics();
+      connectDashboard();
+      connectPlugin();
+    };
+
+    void init();
 
     return () => {
       mountedRef.current = false;

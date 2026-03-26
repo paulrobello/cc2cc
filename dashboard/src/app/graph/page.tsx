@@ -350,34 +350,36 @@ export default function GraphPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
 
-  // Derive edge counts from feed for display stats (pure computation from React state)
-  const edgeStats = useMemo(() => {
+  // Compute edge counts once — used for both display stats and the simulation.
+  // The Map is built here so neither the display memo nor the simulation ref
+  // need to duplicate the iteration over feed.
+  const edgeCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const fm of feed) {
       if (fm.isBroadcast || fm.topicName) continue;
       const key = `${fm.message.from}→${fm.message.to}`;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    return {
-      count: counts.size,
-      total: Array.from(counts.values()).reduce((s, v) => s + v, 0),
-    };
+    return counts;
   }, [feed]);
+
+  // Display stats derived from the shared edgeCounts computation
+  const edgeStats = useMemo(
+    () => ({
+      count: edgeCounts.size,
+      total: Array.from(edgeCounts.values()).reduce((s, v) => s + v, 0),
+    }),
+    [edgeCounts],
+  );
 
   // Sync edges ref for use in the animation loop (not a render concern)
   const edgesRef = useRef<SimEdge[]>([]);
   useEffect(() => {
-    const counts = new Map<string, number>();
-    for (const fm of feed) {
-      if (fm.isBroadcast || fm.topicName) continue;
-      const key = `${fm.message.from}→${fm.message.to}`;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    edgesRef.current = Array.from(counts.entries()).map(([key, weight]) => {
+    edgesRef.current = Array.from(edgeCounts.entries()).map(([key, weight]) => {
       const arrow = key.indexOf("→");
       return { source: key.slice(0, arrow), target: key.slice(arrow + 1), weight };
     });
-  }, [feed]);
+  }, [edgeCounts]);
 
   // Sync nodes from instances map — preserve existing positions
   useEffect(() => {
@@ -435,44 +437,32 @@ export default function GraphPage() {
     return () => observer.disconnect();
   }, []);
 
+  // Refs to carry hovered/selected state into the animation loop closure
+  // without storing them on the DOM element or re-creating the loop.
+  const hoveredRef = useRef<string | null>(null);
+  const selectedRef = useRef<string | null>(null);
+
+  // Keep refs in sync with React state — no DOM property assignment needed
+  useEffect(() => { hoveredRef.current = hoveredId; }, [hoveredId]);
+  useEffect(() => { selectedRef.current = selectedId; }, [selectedId]);
+
   // Animation loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    let hoveredLocal: string | null = null;
-    let selectedLocal: string | null = null;
-
     function loop() {
-      const ctx = canvas!.getContext("2d");
+      const ctx = canvas?.getContext("2d");
       if (!ctx) return;
       const { w, h } = sizeRef.current;
       tick(nodesRef.current, edgesRef.current, w / 2, h / 2, w, h);
-      render(ctx, nodesRef.current, edgesRef.current, w, h, hoveredLocal, selectedLocal);
+      render(ctx, nodesRef.current, edgesRef.current, w, h, hoveredRef.current, selectedRef.current);
       rafRef.current = requestAnimationFrame(loop);
     }
 
     rafRef.current = requestAnimationFrame(loop);
-
-    // Sync hovered/selected into the closure via a ref trick
-    const syncHovered = (id: string | null) => { hoveredLocal = id; };
-    const syncSelected = (id: string | null) => { selectedLocal = id; };
-    (canvas as HTMLCanvasElement & { _syncHovered?: (id: string | null) => void })._syncHovered = syncHovered;
-    (canvas as HTMLCanvasElement & { _syncSelected?: (id: string | null) => void })._syncSelected = syncSelected;
-
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
-
-  // Keep the closure in sync with React state
-  useEffect(() => {
-    const canvas = canvasRef.current as (HTMLCanvasElement & { _syncHovered?: (id: string | null) => void }) | null;
-    if (canvas?._syncHovered) canvas._syncHovered(hoveredId);
-  }, [hoveredId]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current as (HTMLCanvasElement & { _syncSelected?: (id: string | null) => void }) | null;
-    if (canvas?._syncSelected) canvas._syncSelected(selectedId);
-  }, [selectedId]);
 
   // Hit test
   const hitTest = useCallback((cx: number, cy: number): SimNode | null => {

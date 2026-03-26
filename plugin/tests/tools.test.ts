@@ -69,7 +69,9 @@ describe("listInstances", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit | undefined];
     expect(url).toBe(`${httpBase}/api/instances?key=${key}`);
-    expect(init).toBeUndefined();
+    // A 10-second AbortSignal timeout is added for safety — init must include signal
+    expect(init).toBeDefined();
+    expect((init as RequestInit & { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal);
   });
 });
 

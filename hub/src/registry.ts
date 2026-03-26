@@ -12,6 +12,13 @@ interface RegistryEntry extends InstanceInfo {
 /**
  * In-memory map from instanceId → RegistryEntry.
  * Redis keys provide the durable presence layer (24h TTL).
+ *
+ * SINGLE-INSTANCE CONSTRAINT (ARC-010): This map lives in the Bun process heap.
+ * It is not shared between processes — running multiple hub instances behind a
+ * load balancer would result in split-brain where each process sees only its own
+ * connections. The hub is intentionally designed as a single-process service.
+ * If horizontal scaling is needed in the future, this map must be replaced with
+ * a Redis-backed presence store (e.g. using a Redis Hash per instanceId).
  */
 const _map = new Map<string, RegistryEntry>();
 

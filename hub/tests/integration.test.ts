@@ -32,6 +32,13 @@ mock.module("../src/redis.js", () => ({
   checkRedisHealth: mock(async () => true),
 }));
 
+// Mock event-bus (api.ts imports emitToDashboards from here after ARC-003 refactor)
+mock.module("../src/event-bus.js", () => ({
+  emitToDashboards: mock(() => {}),
+  dashboardClients: new Set(),
+  broadcastManager: { addPluginWs: () => {}, removePluginWs: () => {}, broadcast: () => ({}) },
+}));
+
 // Set required env before config is loaded
 process.env.CC2CC_HUB_API_KEY = "integration-test-key";
 process.env.CC2CC_HUB_PORT = "13100";

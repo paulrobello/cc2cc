@@ -1,6 +1,7 @@
 // packages/shared/src/events.ts
 import { z } from "zod";
 import { MessageSchema } from "./schema.js";
+import { MessageType } from "./types.js";
 
 const InstanceJoinedEventSchema = z.object({
 	event: z.literal("instance:joined"),
@@ -24,7 +25,7 @@ const BroadcastSentEventSchema = z.object({
 	event: z.literal("broadcast:sent"),
 	from: z.string().min(1),
 	content: z.string().min(1),
-	type: z.string().optional(),
+	type: z.nativeEnum(MessageType).optional(),
 	timestamp: z.string().datetime(),
 });
 

@@ -1,7 +1,4 @@
-# SEC-016: This image uses a mutable tag (oven/bun:1). For production builds, pin to a SHA
-# digest to ensure reproducibility: FROM oven/bun@sha256:<digest>
-# Retrieve the digest: docker pull oven/bun:1 && docker inspect oven/bun:1 --format='{{index .RepoDigests 0}}'
-FROM oven/bun:1 AS base
+FROM oven/bun:1.1.38 AS base
 WORKDIR /app
 
 # Copy workspace root manifest so Bun workspace resolution works

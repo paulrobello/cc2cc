@@ -54,15 +54,36 @@ class MockWebSocket {
 // Mock the API calls to avoid real network requests
 jest.mock("@/lib/api", () => ({
   fetchInstances: jest.fn().mockResolvedValue([]),
+  fetchTopics: jest.fn().mockResolvedValue([]),
 }));
 
-beforeEach(() => {
-  // Mock global fetch for seedTopics (GET /api/topics)
-  global.fetch = jest.fn().mockResolvedValue({
-    ok: true,
-    json: jest.fn().mockResolvedValue([]),
+/**
+ * Create a URL-aware fetch mock.
+ *
+ * - /api/hub/ws-config → { wsUrl: "ws://localhost:3100", apiKey: "test-key" }
+ * - Everything else    → { ok: true, json: () => [] }
+ *
+ * The WsProvider awaits /api/hub/ws-config before opening WebSocket
+ * connections, so the mock must return the correct shape.
+ */
+function makeFetchMock() {
+  return jest.fn((url: string | URL | Request) => {
+    const urlStr = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+    if (urlStr.includes("/api/hub/ws-config")) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ wsUrl: "ws://localhost:3100", apiKey: "test-key" }),
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve([]),
+    });
   }) as unknown as typeof fetch;
+}
 
+beforeEach(() => {
+  global.fetch = makeFetchMock();
   global.WebSocket = MockWebSocket as unknown as typeof WebSocket;
   MockWebSocket.instances = [];
   jest.useFakeTimers();
@@ -85,39 +106,41 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
+/**
+ * Render WsProvider and drain the microtask queue so the async init()
+ * (fetch /api/hub/ws-config + open WS connections) completes before
+ * test assertions run.
+ */
+async function renderProvider(children: React.ReactNode) {
+  let result!: ReturnType<typeof render>;
+  await act(async () => {
+    result = render(<WsProvider>{children}</WsProvider>);
+  });
+  return result;
+}
+
 function TestConsumer() {
   const ctx = useWs();
   return <div data-testid="state">{ctx.connectionState}</div>;
 }
 
 describe("WsProvider", () => {
-  it("starts in reconnecting state before first connection opens", () => {
-    render(
-      <WsProvider>
-        <TestConsumer />
-      </WsProvider>,
-    );
+  it("starts in reconnecting state before first connection opens", async () => {
+    await renderProvider(<TestConsumer />);
+    // WS connections are open (CONNECTING) but not yet confirmed OPEN
     expect(screen.getByTestId("state").textContent).toBe("reconnecting");
   });
 
-  it("transitions to online when dashboard socket opens", () => {
-    render(
-      <WsProvider>
-        <TestConsumer />
-      </WsProvider>,
-    );
+  it("transitions to online when dashboard socket opens", async () => {
+    await renderProvider(<TestConsumer />);
     act(() => {
       MockWebSocket.dashboardInstance?.simulateOpen();
     });
     expect(screen.getByTestId("state").textContent).toBe("online");
   });
 
-  it("transitions to reconnecting after dashboard socket closes", () => {
-    render(
-      <WsProvider>
-        <TestConsumer />
-      </WsProvider>,
-    );
+  it("transitions to reconnecting after dashboard socket closes", async () => {
+    await renderProvider(<TestConsumer />);
     act(() => {
       MockWebSocket.dashboardInstance?.simulateOpen();
     });
@@ -127,12 +150,8 @@ describe("WsProvider", () => {
     expect(screen.getByTestId("state").textContent).toBe("reconnecting");
   });
 
-  it("transitions to disconnected after 3 failed reconnect attempts", () => {
-    render(
-      <WsProvider>
-        <TestConsumer />
-      </WsProvider>,
-    );
+  it("transitions to disconnected after 3 failed reconnect attempts", async () => {
+    await renderProvider(<TestConsumer />);
     // Attempt 1
     act(() => {
       MockWebSocket.dashboardInstance?.simulateClose();
@@ -148,16 +167,12 @@ describe("WsProvider", () => {
     expect(screen.getByTestId("state").textContent).toBe("disconnected");
   });
 
-  it("parses instance:joined event and adds to instances map", () => {
+  it("parses instance:joined event and adds to instances map", async () => {
     function InstanceConsumer() {
       const { instances } = useWs();
       return <div data-testid="count">{instances.size}</div>;
     }
-    render(
-      <WsProvider>
-        <InstanceConsumer />
-      </WsProvider>,
-    );
+    await renderProvider(<InstanceConsumer />);
     act(() => {
       MockWebSocket.dashboardInstance?.simulateOpen();
     });
@@ -171,12 +186,8 @@ describe("WsProvider", () => {
     expect(screen.getByTestId("count").textContent).toBe("1");
   });
 
-  it("opens both a dashboard WS and a plugin WS on mount", () => {
-    render(
-      <WsProvider>
-        <TestConsumer />
-      </WsProvider>,
-    );
+  it("opens both a dashboard WS and a plugin WS on mount", async () => {
+    await renderProvider(<TestConsumer />);
     expect(MockWebSocket.dashboardInstance).not.toBeNull();
     expect(MockWebSocket.pluginInstance).not.toBeNull();
     expect(MockWebSocket.pluginInstance?.url).toContain("/ws/plugin");

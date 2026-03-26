@@ -169,7 +169,7 @@ The dashboard's `next dev` and `next build` commands include the `--webpack` fla
 
 ### `from` is server-stamped on the WebSocket path
 
-The hub ignores any `from` field in client frames sent over `/ws/plugin` and stamps it from the authenticated instance identity. Do not rely on or pass `from` when sending via the WS path. The REST publish endpoint (`POST /api/topics/:name/publish`) currently accepts `from` from the request body — see SEC-007 in AUDIT.md.
+The hub ignores any `from` field in client frames sent over `/ws/plugin` and stamps it from the authenticated instance identity. Do not rely on or pass `from` when sending via the WS path. The REST publish endpoint (`POST /api/topics/:name/publish`) server-stamps `from` as well — the client-supplied value is ignored. See `AUDIT.md` (finding SEC-007) for the full audit trail.
 
 ### Dashboard sends via its plugin WS, not the dashboard WS
 
@@ -184,7 +184,7 @@ cc2cc is designed for trusted LAN environments. The shared API key is sent as a 
 ## Related Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — component responsibilities, message flow, design invariants
-- [docs/api/REST_API.md](docs/REST_API.md) — REST endpoint reference
-- [docs/guides/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common failure modes
+- [docs/REST_API.md](docs/REST_API.md) — REST endpoint reference
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common failure modes
 - [SECURITY.md](SECURITY.md) — threat model and responsible disclosure
 - [CHANGELOG.md](CHANGELOG.md) — version history

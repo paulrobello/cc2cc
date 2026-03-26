@@ -1,9 +1,7 @@
 // hub/src/broadcast.ts
 import type { MessageType } from "@cc2cc/shared";
 import { randomUUID } from "node:crypto";
-
-/** WebSocket.OPEN numeric value. The WebSocket global is not available in Bun server context. */
-const WS_OPEN = 1;
+import { WS_OPEN } from "./constants.js";
 
 interface BroadcastResult {
   delivered: number;

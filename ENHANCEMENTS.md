@@ -54,8 +54,8 @@ Richer per-instance details: role, subscribed topics, queue depth, online/offlin
 
 ## Dashboard
 
-### 13. Network Graph Visualization
-D3 or vis-network graph of who is talking to whom — nodes are instances, edges are message flows with edge thickness proportional to volume. Invaluable for debugging complex orchestrations.
+### ~~13. Network Graph Visualization~~ (shipped in v0.2.2)
+Canvas-based force-directed graph shipped in the dashboard `/graph` page. Nodes represent instances (online/offline), directed edges show message flows with thickness proportional to volume; drag-to-pin and hover tooltips included.
 
 ### 14. Message Search
 Full-text search across the dashboard's local feed cache. Currently there is a type/instance filter but no content search, making it hard to find specific messages in a busy hub.
@@ -70,8 +70,8 @@ Export a thread or topic history as Markdown or JSON. Useful for post-mortems, f
 
 ## Orchestration
 
-### 17. Agent Groups / Role-Based Routing
-`send_message(to: "role:reviewer")` fans out to all instances with that role. Right now you must call `list_instances`, filter by role, and send N messages manually — this makes it a first-class primitive.
+### ~~17. Agent Groups / Role-Based Routing~~ (shipped in v0.2.2)
+`send_message({ to: "role:reviewer", ... })` now fans out to all instances with that role. Each recipient gets a unique envelope; offline instances are queued. Returns `{ role, recipients, delivered, queued }`.
 
 ### 18. Leader Election
 `elect_leader(topic)` — instances compete via a Redis atomic operation; one wins and receives a `leader:elected` message. Useful for coordinator patterns where only one agent should act on a shared task.
@@ -84,9 +84,9 @@ Export a thread or topic history as Markdown or JSON. Useful for post-mortems, f
 |----------|---|---------|-----------|
 | High | 1 | `wait_for_reply` tool | Eliminates the most common boilerplate in agent code |
 | High | 4 | Message History Store | Unlocks the stub endpoint, topic catchup, and tools #10/#11 |
-| High | 13 | Network Graph Dashboard | Best observability win for complex orchestrations |
+| ~~High~~ | ~~13~~ | ~~Network Graph Dashboard~~ | Shipped in v0.2.2 |
 | Medium | 8 | Per-Instance API Keys | Real security improvement for multi-team or multi-project use |
-| Medium | 17 | Role-Based Routing | Dramatically simplifies orchestrator logic |
+| ~~Medium~~ | ~~17~~ | ~~Role-Based Routing~~ | Shipped in v0.2.2 |
 | Medium | 2 | Formal Task Lifecycle | Enables structured multi-step workflows without custom conventions |
 | Low | 7 | Prometheus Metrics | Production observability — low urgency for LAN-only use |
 | Low | 18 | Leader Election | Niche but powerful for competitive coordinator patterns |

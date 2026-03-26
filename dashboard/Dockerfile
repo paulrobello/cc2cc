@@ -1,27 +1,25 @@
 # dashboard/Dockerfile
 #
-# SECURITY WARNING — LAN-ONLY DEPLOYMENT
+# SECURITY — BFF PROXY PATTERN
 # ─────────────────────────────────────────────────────────────────────────────
-# NEXT_PUBLIC_CC2CC_HUB_API_KEY is baked into the static JavaScript bundle at
-# build time by the ARG/ENV directives below. Any user who can open this
-# dashboard in a browser can extract the hub API key from the bundle.
+# The hub API key is NO LONGER baked into the static JavaScript bundle.
+# Instead, the dashboard proxies all hub REST calls through Next.js API routes
+# (src/app/api/hub/) that inject the key server-side. WebSocket credentials are
+# fetched at runtime via GET /api/hub/ws-config (also server-side).
 #
-# This image MUST only be deployed on a trusted private LAN. NEVER:
-#   - expose port 8029 to the internet
-#   - place this container behind a public-facing reverse proxy
-#   - deploy to cloud environments accessible by untrusted users
+# Required runtime environment variable (set in docker-compose or at run time):
+#   CC2CC_HUB_API_KEY    — hub API key (server-side only, never sent to browser)
 #
-# For internet-facing deployments, implement a BFF (Backend-For-Frontend)
-# pattern: remove NEXT_PUBLIC_CC2CC_HUB_API_KEY from the build args and proxy
-# all hub requests through authenticated Next.js API routes that hold the key
-# server-side. See README.md § Security > Dashboard Deployment Warning.
+# Optional runtime environment variable:
+#   CC2CC_HUB_WS_URL     — hub WebSocket base URL (default: ws://localhost:3100)
+#
+# The build-time arg NEXT_PUBLIC_CC2CC_HUB_WS_URL is still accepted so the
+# Content-Security-Policy header in next.config.ts can include the hub origin.
+# It does NOT contain the API key.
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# SEC-016: These stages use mutable tags (oven/bun:1-alpine). For production builds, pin to
-# SHA digests to ensure reproducibility: FROM oven/bun@sha256:<digest>
-# Retrieve the digest: docker pull oven/bun:1-alpine && docker inspect oven/bun:1-alpine --format='{{index .RepoDigests 0}}'
 # ── Stage 1: dependencies ──────────────────────────────────────────────────────
-FROM oven/bun:1-alpine AS deps
+FROM oven/bun:1.1.38-alpine AS deps
 WORKDIR /app
 
 # Copy workspace root configs needed for workspace resolution
@@ -35,7 +33,7 @@ COPY dashboard/package.json ./dashboard/
 RUN bun install --frozen-lockfile
 
 # ── Stage 2: builder ───────────────────────────────────────────────────────────
-FROM oven/bun:1-alpine AS builder
+FROM oven/bun:1.1.38-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -47,23 +45,28 @@ COPY packages/shared ./packages/shared
 # Copy dashboard source
 COPY dashboard ./dashboard
 
-# Build args become NEXT_PUBLIC_* env vars baked into the static build
+# NEXT_PUBLIC_CC2CC_HUB_WS_URL is still baked in at build time so the
+# Content-Security-Policy connect-src directive in next.config.ts can include
+# the hub WebSocket origin. It does NOT contain any credentials.
+# The API key is injected at container runtime via CC2CC_HUB_API_KEY.
 ARG NEXT_PUBLIC_CC2CC_HUB_WS_URL=ws://localhost:3100
-ARG NEXT_PUBLIC_CC2CC_HUB_API_KEY=change-me
 
 ENV NEXT_PUBLIC_CC2CC_HUB_WS_URL=$NEXT_PUBLIC_CC2CC_HUB_WS_URL
-ENV NEXT_PUBLIC_CC2CC_HUB_API_KEY=$NEXT_PUBLIC_CC2CC_HUB_API_KEY
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN cd dashboard && bun run build
 
 # ── Stage 3: runner ────────────────────────────────────────────────────────────
-FROM oven/bun:1-alpine AS runner
+FROM oven/bun:1.1.38-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=8029
+# CC2CC_HUB_API_KEY must be supplied at container run time (not baked in).
+# CC2CC_HUB_WS_URL defaults to ws://localhost:3100 if not supplied.
+ENV CC2CC_HUB_API_KEY=""
+ENV CC2CC_HUB_WS_URL=""
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs

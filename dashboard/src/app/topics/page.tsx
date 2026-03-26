@@ -41,7 +41,7 @@ export default function TopicsPage() {
       setNewTopicName("");
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -51,7 +51,7 @@ export default function TopicsPage() {
       if (selectedTopic === name) setSelectedTopic(null);
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -68,7 +68,7 @@ export default function TopicsPage() {
       }
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -80,7 +80,7 @@ export default function TopicsPage() {
       setContent("");
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -247,7 +247,7 @@ export default function TopicsPage() {
                           await unsubscribeFromTopic(selectedTopic!, subId);
                           setError(null);
                         } catch (err) {
-                          setError((err as Error).message);
+                          setError(err instanceof Error ? err.message : String(err));
                         }
                       }}
                       className="font-mono text-[10px] px-1 rounded shrink-0"

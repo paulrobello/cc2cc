@@ -53,10 +53,29 @@ const redisMock = {
     return 1;
   }),
   lrange: mock(async () => [] as string[]),
-  pipeline: mock(() => ({
-    llen: mock(() => ({ exec: mock(async () => []) })),
-    exec: mock(async () => []),
-  })),
+  pipeline: mock(() => {
+    const commands: Array<{ cmd: string; args: unknown[] }> = [];
+    const pipeline: Record<string, unknown> = {
+      llen: mock((...args: unknown[]) => {
+        calls.push({ cmd: "llen", args });
+        return pipeline;
+      }),
+      incr: mock((...args: unknown[]) => {
+        calls.push({ cmd: "incr", args });
+        return pipeline;
+      }),
+      expireat: mock((...args: unknown[]) => {
+        calls.push({ cmd: "expireat", args });
+        return pipeline;
+      }),
+      smembers: mock((...args: unknown[]) => {
+        calls.push({ cmd: "smembers", args });
+        return pipeline;
+      }),
+      exec: mock(async () => commands.map(() => [null, 0])),
+    };
+    return pipeline;
+  }),
   on: mock(() => {}),
 };
 
@@ -68,6 +87,11 @@ mock.module("../src/redis.js", () => ({
 // Own the queue.js mock so topic-manager.test.ts's mock.module("../src/queue.js") doesn't leak in.
 // The factory re-implements queue.ts using the local redisMock — each Bun worker gets its own
 // instance when both files call mock.module for the same specifier.
+//
+// NOTE (QA-016): This re-implementation is intentional. Importing the real queue.ts against the
+// mocked redis leads to Bun test isolation issues when test files run in the same worker — the
+// first importer's redis mock wins for all subsequent imports. The replica here is kept in sync
+// manually; when queue.ts changes, update this block accordingly.
 const MAX_QUEUE_DEPTH = 1000;
 const QUEUE_TTL_SECONDS = 86400;
 const queueKey = (id: string) => `queue:${id}`;

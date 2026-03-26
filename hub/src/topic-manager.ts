@@ -3,7 +3,7 @@ import type { Message, TopicInfo } from "@cc2cc/shared";
 import { redis } from "./redis.js";
 import { pushMessage } from "./queue.js";
 import { parseProject } from "./utils.js";
-export { parseProject } from "./utils.js";
+import { WS_OPEN } from "./constants.js";
 
 /**
  * Validate topic name format: lowercase alphanumeric, hyphens, underscores.
@@ -17,9 +17,6 @@ export function validateTopicName(name: unknown): string | null {
   }
   return null;
 }
-
-/** WebSocket.OPEN numeric value. The WebSocket global is not available in Bun server context. */
-const WS_OPEN = 1;
 
 /** WS-ref shape needed for live delivery in publishToTopic */
 interface WsRef {
@@ -161,25 +158,63 @@ export const topicManager = {
   async listTopics(): Promise<TopicInfo[]> {
     // Use topics:index Set instead of blocking KEYS scan
     const names = await redis.smembers("topics:index");
-    const results = await Promise.all(
-      names.map(async (name) => {
-        const data = await redis.hgetall(`topic:${name}`);
-        if (!data || !data.name) {
-          console.warn(
-            `[topic-manager] listTopics: malformed or missing hash for topic "${name}" — skipping`,
-          );
-          return null;
-        }
-        const subscribers = await redis.smembers(`topic:${name}:subscribers`);
-        return {
-          name: data.name,
-          createdAt: data.createdAt ?? "",
-          createdBy: data.createdBy ?? "",
-          subscriberCount: subscribers.length,
-        } satisfies TopicInfo;
-      }),
-    );
-    return results.filter((t): t is TopicInfo => t !== null);
+    if (names.length === 0) return [];
+
+    // Batch all HGETALL and SMEMBERS into a single pipeline round-trip (ARC-007).
+    // Pipeline layout: even indices = HGETALL results, odd indices = SMEMBERS results.
+    const pipeline = redis.pipeline();
+    for (const name of names) {
+      pipeline.hgetall(`topic:${name}`);
+      pipeline.smembers(`topic:${name}:subscribers`);
+    }
+    const pipelineResults = (await pipeline.exec()) ?? [];
+
+    const results: TopicInfo[] = [];
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i];
+      const data = (pipelineResults[i * 2]?.[1] ?? null) as Record<string, string> | null;
+      const subscribers = (pipelineResults[i * 2 + 1]?.[1] ?? null) as string[] | null;
+      if (!data || !data.name) {
+        console.warn(
+          `[topic-manager] listTopics: malformed or missing hash for topic "${name}" — skipping`,
+        );
+        continue;
+      }
+      results.push({
+        name: data.name,
+        createdAt: data.createdAt ?? "",
+        createdBy: data.createdBy ?? "",
+        subscriberCount: (subscribers ?? []).length,
+      });
+    }
+    return results;
+  },
+
+  /**
+   * Return topics with their subscriber arrays in a single batch (ARC-008).
+   *
+   * Accepts the output of `listTopics()` (already pipelined) and issues a second
+   * pipeline round-trip only for the SMEMBERS calls that are not already included
+   * in the `listTopics` pipeline. Because `listTopics` already fetches SMEMBERS
+   * data, this method reuses the same pipeline approach to avoid redundant I/O.
+   *
+   * @param topics - Output from `listTopics()`.
+   * @returns Each topic extended with a `subscribers` string array.
+   */
+  async listTopicsWithSubscribers(
+    topics: TopicInfo[],
+  ): Promise<(TopicInfo & { subscribers: string[] })[]> {
+    if (topics.length === 0) return [];
+    // Batch all SMEMBERS in one pipeline round-trip
+    const pipeline = redis.pipeline();
+    for (const t of topics) {
+      pipeline.smembers(`topic:${t.name}:subscribers`);
+    }
+    const results = (await pipeline.exec()) ?? [];
+    return topics.map((t, i) => ({
+      ...t,
+      subscribers: ((results[i]?.[1] ?? null) as string[] | null) ?? [],
+    }));
   },
 
   /**
@@ -254,5 +289,43 @@ export const topicManager = {
     }
 
     return { delivered, queued };
+  },
+
+  /**
+   * Migrate all topic subscriptions from one instance ID to another.
+   *
+   * Used during session updates (/clear) to atomically transfer every topic
+   * membership from the old session identity to the new one. The operation is
+   * idempotent — any subscriptions the new ID already holds are preserved via
+   * SUNIONSTORE.
+   *
+   * After migration the old instance's reverse-index key is deleted and each
+   * topic's subscriber set is updated in a single pipeline round-trip.
+   *
+   * @param oldInstanceId - The instance ID being replaced.
+   * @param newInstanceId - The new instance ID to receive the subscriptions.
+   * @returns The list of topic names that were migrated.
+   */
+  async migrateSubscriptions(oldInstanceId: string, newInstanceId: string): Promise<string[]> {
+    const topicNames = await redis.smembers(`instance:${oldInstanceId}:topics`);
+    if (topicNames.length === 0) return [];
+
+    // Build a pipeline: for each topic, swap oldInstanceId for newInstanceId in the subscriber set.
+    const pipeline = redis.pipeline();
+    for (const name of topicNames) {
+      pipeline.srem(`topic:${name}:subscribers`, oldInstanceId);
+      pipeline.sadd(`topic:${name}:subscribers`, newInstanceId);
+    }
+    // Merge old topics into the new instance's reverse index (preserving any existing ones)
+    pipeline.sunionstore(
+      `instance:${newInstanceId}:topics`,
+      `instance:${newInstanceId}:topics`,
+      `instance:${oldInstanceId}:topics`,
+    );
+    // Remove the old reverse index
+    pipeline.del(`instance:${oldInstanceId}:topics`);
+    await pipeline.exec();
+
+    return topicNames;
   },
 };

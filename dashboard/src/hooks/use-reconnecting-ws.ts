@@ -34,6 +34,10 @@ export interface ReconnectingWsHandle {
  * The caller provides a URL factory (`getUrl`) so the URL can depend on
  * state (e.g. instanceId) that is only known at connect time.
  *
+ * Callbacks in `opts` are stored in a ref so they are always read at call
+ * time rather than captured at `connect` creation time. This prevents stale
+ * closures when the parent component re-renders with new handlers.
+ *
  * Lifecycle: call `connect()` to start; call `destroy()` on unmount.
  */
 export function useReconnectingWs(
@@ -45,6 +49,13 @@ export function useReconnectingWs(
   const backoffMsRef = useRef(BACKOFF_INITIAL_MS);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const destroyedRef = useRef(false);
+
+  // Keep a stable ref to the latest opts so WS event handlers always call
+  // the current callbacks without being re-created on every render.
+  const optsRef = useRef<ReconnectingWsOptions>(opts);
+  useEffect(() => {
+    optsRef.current = opts;
+  });
 
   // Stable ref for the connect function so closures always call the latest version
   const connectRef = useRef<() => void>(() => {});
@@ -58,20 +69,20 @@ export function useReconnectingWs(
     ws.onopen = () => {
       if (!mountedRef.current) return;
       backoffMsRef.current = BACKOFF_INITIAL_MS; // reset on successful connect
-      opts.onOpen?.(ws);
+      optsRef.current.onOpen?.(ws);
     };
 
     ws.onmessage = (evt: MessageEvent<string>) => {
-      opts.onMessage?.(evt.data);
+      optsRef.current.onMessage?.(evt.data);
     };
 
     ws.onerror = () => {
-      opts.onError?.();
+      optsRef.current.onError?.();
     };
 
     ws.onclose = () => {
       if (!mountedRef.current || destroyedRef.current) return;
-      opts.onClose?.();
+      optsRef.current.onClose?.();
       // Schedule reconnect with current backoff, then increase for next attempt
       reconnectTimerRef.current = setTimeout(() => {
         backoffMsRef.current = Math.min(
@@ -81,7 +92,6 @@ export function useReconnectingWs(
         connectRef.current();
       }, backoffMsRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getUrl, mountedRef]);
 
   useEffect(() => {
