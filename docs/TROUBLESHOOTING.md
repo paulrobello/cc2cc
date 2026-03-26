@@ -19,7 +19,7 @@ Common failure modes, diagnostic steps, and solutions for cc2cc.
 
 ## Hub Won't Start
 
-### Symptom: `Error: CC2CC_HUB_API_KEY is required`
+### Symptom: `[hub] FATAL: CC2CC_HUB_API_KEY is not set. Set it in .env before starting.`
 
 **Cause:** The `CC2CC_HUB_API_KEY` environment variable is not set.
 
@@ -302,7 +302,7 @@ cd hub && bun test
 
 ## Related Documentation
 
-- [docs/ARCHITECTURE.md](ARCHITECTURE.md) — system design and message flow
-- [docs/api/REST_API.md](REST_API.md) — REST endpoint reference
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system design and message flow
+- [REST_API.md](REST_API.md) — REST endpoint reference
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup and test workflow
 - [SECURITY.md](../SECURITY.md) — security configuration

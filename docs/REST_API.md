@@ -21,11 +21,14 @@ Complete reference for the cc2cc hub REST API. All endpoints are served by the h
 
 ## Authentication
 
-All endpoints except `GET /health` require the API key as a query parameter:
+All endpoints except `GET /health` require the API key. The hub accepts the key in two ways:
 
-```
-?key=<CC2CC_HUB_API_KEY>
-```
+1. **Authorization header** (preferred for REST): `Authorization: Bearer <CC2CC_HUB_API_KEY>`
+2. **Query parameter** (fallback): `?key=<CC2CC_HUB_API_KEY>`
+
+The hub checks the `Authorization` header first; if absent or not in `Bearer` format, it falls back to the `?key=` query parameter.
+
+> **Note:** WebSocket upgrade requests (`/ws/plugin`, `/ws/dashboard`) only support query-parameter authentication. The `Authorization` header is not read during WebSocket upgrades.
 
 Requests with a missing or incorrect key receive:
 
@@ -34,7 +37,7 @@ HTTP 401
 { "error": "Unauthorized" }
 ```
 
-The key is compared using a timing-safe byte comparison (`crypto.timingSafeEqual`) to prevent timing-oracle attacks.
+The key is compared using a timing-safe byte comparison (`timingSafeEqual` from `node:crypto`) to prevent timing-oracle attacks.
 
 ---
 
@@ -242,6 +245,7 @@ Delete a topic. Fails if the topic has active subscribers.
 **Path parameter:** `name` — topic name
 
 **Errors:**
+- `400` — invalid topic name format
 - `404` — topic not found
 - `409` — topic has subscribers (includes `subscriberCount` in response)
 
@@ -258,6 +262,7 @@ Return all instances currently subscribed to a topic.
 **Response:** `string[]` — array of instance IDs
 
 **Errors:**
+- `400` — invalid topic name format
 - `404` — topic not found
 
 #### `POST /api/topics/:name/subscribe`
@@ -271,6 +276,7 @@ Subscribe an instance to a topic.
 ```
 
 **Errors:**
+- `400` — invalid topic name format
 - `404` — topic not found, or instance not found
 
 **Response:**
@@ -290,7 +296,7 @@ Unsubscribe an instance from a topic. Respects the auto-joined project topic gua
 ```
 
 **Errors:**
-- `400` — attempt to unsubscribe from the auto-joined project topic (online instances)
+- `400` — invalid topic name format, or attempt to unsubscribe from the auto-joined project topic (online instances)
 - `404` — topic not found
 
 **Response:**
@@ -330,8 +336,7 @@ Publish a message to all subscribers of a topic. The `from` field is server-stam
 ```json
 {
   "delivered": 2,
-  "queued": 1,
-  "messageId": "550e8400-e29b-41d4-a716-446655440000"
+  "queued": 1
 }
 ```
 
@@ -339,7 +344,6 @@ Publish a message to all subscribers of a topic. The `from` field is server-stam
 |-------|------|-------------|
 | `delivered` | `number` | Live WebSocket deliveries |
 | `queued` | `number` | Messages added to Redis queues (persistent path) |
-| `messageId` | `string` | UUID assigned to the published message |
 
 ---
 

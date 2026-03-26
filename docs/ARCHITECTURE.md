@@ -116,13 +116,15 @@ No build step — all other workspaces import directly from TypeScript source vi
 |--------|---------------|
 | `index.ts` | Entry point; Bun + Hono server setup, WS upgrade routing for `/ws/plugin` and `/ws/dashboard`, CORS |
 | `config.ts` | Environment: `CC2CC_HUB_PORT` (3100), `CC2CC_HUB_API_KEY` (required), `CC2CC_REDIS_URL` |
-| `registry.ts` | In-memory `Map` of live connections + Redis presence TTLs (24 h); partial address resolution |
+| `auth.ts` | Timing-safe API key comparison via `keysEqual()` to prevent timing attacks |
+| `registry.ts` | In-memory `Map` of live connections + Redis presence TTLs (24 h); partial address resolution; role-based lookup via `getByRole()` |
 | `queue.ts` | RPOPLPUSH-based at-least-once delivery; max 1000 msgs/queue; daily stats counter (`stats:messages:today`) with EXPIREAT midnight UTC; queue migration for session updates |
 | `broadcast.ts` | `BroadcastManager`: in-memory fan-out + per-instance 5 s rate limiter |
 | `topic-manager.ts` | Pub/sub topic lifecycle (create, delete, subscribe, unsubscribe, publish); persistent topic messages queued to offline subscribers; project topic auto-joined on connect |
-| `ws-handler.ts` | Plugin/dashboard WS lifecycle; message routing; emits `HubEvent` to `dashboardClients` set; handles 8 WS actions |
-| `api.ts` | REST handlers; `GET /health` is the only unauthenticated endpoint; all others require `?key=` |
+| `ws-handler.ts` | Plugin/dashboard WS lifecycle; message routing including role-based fan-out (`to: "role:<name>"`); emits `HubEvent` to `dashboardClients` set; handles 8 WS actions |
+| `api.ts` | REST handlers; `GET /health` is the only unauthenticated endpoint; all others require `Authorization: Bearer <key>` header (preferred) or `?key=` query param (fallback) |
 | `redis.ts` | Redis client setup (ioredis) and health check helper |
+| `utils.ts` | Standalone `parseProject()` helper for extracting the project segment from an instance ID |
 | `validation.ts` | Shared validation constants (e.g. `INSTANCE_ID_RE`) |
 
 ---
@@ -133,10 +135,11 @@ No build step — all other workspaces import directly from TypeScript source vi
 
 | Module | Responsibility |
 |--------|---------------|
-| `config.ts` | Assembles `instanceId` from env vars; reads Claude session ID from `.claude/.cc2cc-session-id` (written by `SessionStart` hook), falling back to random UUIDv4 |
+| `config.ts` | Assembles `instanceId` from env vars; polls for Claude session ID from `.claude/.cc2cc-session-id` (written by `SessionStart` hook), falling back to random UUIDv4 |
 | `connection.ts` | `HubConnection`: WS client using the `ws` package; exponential backoff (1 s → ×2 → 30 s max); `request()` method with 10 s timeout |
 | `channel.ts` | Converts hub `message:sent` events into `notifications/claude/channel` MCP notifications with `source: "cc2cc"` in meta |
-| `tools.ts` | Ten MCP tools — `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic`. **Note:** The `ping` tool calls `GET /api/ping/:id` which is not yet implemented on the hub; it will return 404 |
+| `session-watcher.ts` | Watches `.claude/.cc2cc-session-id` via `fs.watchFile` for session changes (e.g. `/clear`); triggers `session_update` on the hub, replaces connection and tools with new identity |
+| `tools.ts` | Ten MCP tools — `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic` |
 
 **Instance ID format:**
 
@@ -191,6 +194,7 @@ The UUID is generated once per browser session (stored in `sessionStorage`) and 
 | `app/topics/page.tsx` | Topics management: topic list + create/delete, subscriber list + subscribe/unsubscribe, publish panel |
 | `app/analytics/page.tsx` | Stats bar + activity timeline |
 | `app/conversations/page.tsx` | Thread-grouped conversation view + message inspector |
+| `app/graph/page.tsx` | Network Graph: force-directed canvas visualization of instances, roles, and message traffic |
 | `lib/api.ts` | Typed fetch wrappers for hub REST; `AbortSignal.timeout(10_000)` on all calls; topic wrappers: `fetchTopics`, `createTopic`, `deleteTopic`, `subscribeToTopic`, `unsubscribeFromTopic` |
 
 ---
@@ -206,7 +210,8 @@ The skill includes:
 - `.claude-plugin/plugin.json` — plugin manifest with metadata, required/optional env vars
 - `.mcp.json` — MCP server definition pointing to `plugin/src/index.ts`
 - `skills/cc2cc/patterns/` — reusable patterns: task delegation, broadcast, result aggregation, and topics
-- `hooks/` — `SessionStart` hook that writes the Claude session ID to `.claude/.cc2cc-session-id` for stable instance identity
+- `hooks/hooks.json` — hook manifest declaring the `SessionStart` event
+- `hooks/scripts/` — hook scripts; `SessionStart` writes the Claude session ID to `.claude/.cc2cc-session-id` for stable instance identity
 
 ---
 
@@ -244,7 +249,7 @@ sequenceDiagram
 
 ## WebSocket Protocol
 
-All WebSocket connections authenticate via query parameter: `?key=<CC2CC_HUB_API_KEY>`. Authorization headers are not supported (Bun WS upgrade does not allow them).
+All WebSocket connections authenticate via query parameter: `?key=<CC2CC_HUB_API_KEY>` (Bun WS upgrade does not support Authorization headers). REST endpoints accept both `Authorization: Bearer <key>` header (preferred) and `?key=` query param (fallback).
 
 ### Plugin WebSocket Actions
 
@@ -254,7 +259,7 @@ All frames are JSON objects with an `action` field. Every request frame carries 
 
 | Action | Payload | Ack |
 |--------|---------|-----|
-| `send_message` | `{ to, type, content, replyToMessageId?, metadata?, requestId }` | `{ requestId, messageId, queued, warning? }` |
+| `send_message` | `{ to, type, content, replyToMessageId?, metadata?, requestId }` | Direct: `{ requestId, messageId, queued, warning? }` — Role (`to: "role:<name>"`): `{ requestId, role, recipients, delivered, queued }` |
 | `broadcast` | `{ type, content, metadata?, requestId }` | `{ requestId, delivered }` |
 | `get_messages` | `{ limit?, requestId }` | `{ requestId, messages[] }` |
 | `session_update` | `{ newInstanceId, requestId }` | `{ requestId, migrated }` |
@@ -295,7 +300,7 @@ Dashboards connect to `/ws/dashboard?key=<KEY>` and receive a stream of `HubEven
 
 ## REST API
 
-All endpoints require `?key=<CC2CC_HUB_API_KEY>` except `GET /health`.
+All endpoints except `GET /health` require authentication via `Authorization: Bearer <CC2CC_HUB_API_KEY>` header (preferred) or `?key=<CC2CC_HUB_API_KEY>` query param (fallback).
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -303,6 +308,7 @@ All endpoints require `?key=<CC2CC_HUB_API_KEY>` except `GET /health`.
 | `GET` | `/api/instances` | List all registered instances with status and queue depth |
 | `GET` | `/api/stats` | Current message stats (total today, active instances, queued messages) |
 | `GET` | `/api/messages/:id` | Stub — returns 404; use the WS event stream to build a local message index |
+| `GET` | `/api/ping/:id` | Check whether an instance is currently online; returns `{ online, instanceId }` |
 | `DELETE` | `/api/instances/:id` | Remove an offline instance and flush its queue; returns 409 if instance is online |
 | `DELETE` | `/api/queue/:id` | Flush an instance's Redis queue without removing the registry entry |
 | `GET` | `/api/topics` | List all topics with subscriber counts |
@@ -313,7 +319,7 @@ All endpoints require `?key=<CC2CC_HUB_API_KEY>` except `GET /health`.
 | `POST` | `/api/topics/:name/unsubscribe` | Unsubscribe an instance from a topic |
 | `POST` | `/api/topics/:name/publish` | Publish a message to a topic |
 
-> **Note:** There are no REST endpoints for `send_message`, `broadcast`, or `ping`. All direct message delivery and identity-dependent operations go through the plugin WebSocket connection. The Topics API is available via both REST and WS.
+> **Note:** There are no REST endpoints for `send_message` or `broadcast`. All direct message delivery and identity-dependent operations go through the plugin WebSocket connection. `GET /api/ping/:id` is a lightweight online check (no WS identity needed). The Topics API is available via both REST and WS.
 
 ---
 
@@ -356,7 +362,7 @@ The hub ignores any `from` field in client frames and stamps it from the sender'
 `MessageType` enum values are `task | result | question | ack | ping`. Broadcast fan-out is triggered when `message.to === 'broadcast'`, not by a dedicated type.
 
 **WebSocket auth is query-param only.**
-Both `/ws/plugin` and `/ws/dashboard` authenticate via `?key=<CC2CC_HUB_API_KEY>`. Authorization headers are not used.
+Both `/ws/plugin` and `/ws/dashboard` authenticate via `?key=<CC2CC_HUB_API_KEY>`. REST endpoints additionally accept `Authorization: Bearer <key>` header (preferred), falling back to the `?key=` query param.
 
 **Queue delivery is at-least-once.**
 The RPOPLPUSH pattern ensures a message is never lost between "popped from queue" and "acked by recipient". Crash recovery replays the `processing:` key.
@@ -364,8 +370,11 @@ The RPOPLPUSH pattern ensures a message is never lost between "popped from queue
 **Broadcast is fire-and-forget.**
 Messages sent to `to: 'broadcast'` fan out over live WS connections only — not queued. Offline instances will not receive them.
 
+**`role:<name>` is fan-out routing.**
+When `send_message` receives `to: "role:<name>"`, the hub fans out to every instance whose role matches, excluding the sender. Each recipient gets its own envelope with a unique `messageId`. Returns `{ role, recipients, delivered, queued }`.
+
 **All message delivery is WebSocket-only.**
-There are no REST endpoints for `send_message`, `broadcast`, or `ping`. The hub's REST API is for metadata (instance list, stats, remove), topic management, and topic publishing only.
+There are no REST endpoints for `send_message` or `broadcast`. The hub's REST API is for metadata (instance list, stats, ping, remove), topic management, and topic publishing only.
 
 ---
 
