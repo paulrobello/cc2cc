@@ -66,7 +66,7 @@ export function MessageFeed({
   }, [filtered.length, autoScroll]);
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Feed filter bar (all/direct/broadcast/topic) */}
       <div className="flex gap-1 px-3 py-1.5 shrink-0" style={{ borderBottom: "1px solid #1a3356" }}>
         {(["all", "direct", "broadcast"] as const).map((kind) => (

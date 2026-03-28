@@ -95,7 +95,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Recent messages panel */}
-        <div className="flex min-h-0 flex-col">
+        <div className="flex min-h-0 flex-col overflow-hidden">
           <div
             className="shrink-0 px-4 py-2"
             style={{ borderBottom: "1px solid #1a3356", background: "#070f1e" }}
@@ -107,7 +107,7 @@ export default function AnalyticsPage() {
               ◈ Recent Transmissions
             </h2>
           </div>
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1 overflow-hidden">
             <MessageFeed
               feed={recent}
               filterInstanceId={null}
