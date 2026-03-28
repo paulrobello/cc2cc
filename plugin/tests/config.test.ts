@@ -19,6 +19,7 @@ const ENV_KEYS = [
   "CC2CC_USERNAME",
   "CC2CC_HOST",
   "CC2CC_PROJECT",
+  "CC2CC_SESSION_ID",
 ];
 
 describe("loadConfig", () => {
@@ -83,6 +84,34 @@ describe("loadConfig", () => {
     // sessionId should be populated
     expect(config.sessionId.length).toBeGreaterThan(0);
     expect(config.instanceId).toBe(`bob@laptop:demo/${config.sessionId}`);
+  });
+
+  it("uses CC2CC_SESSION_ID env var when set", async () => {
+    process.env.CC2CC_HUB_URL = "ws://localhost:3100";
+    process.env.CC2CC_API_KEY = "key";
+    process.env.CC2CC_USERNAME = "bob";
+    process.env.CC2CC_HOST = "laptop";
+    process.env.CC2CC_PROJECT = "demo";
+    process.env.CC2CC_SESSION_ID = "fixed-session-id-for-team";
+
+    const { loadConfig } = await import("../src/config.ts");
+    const config = await loadConfig();
+
+    expect(config.sessionId).toBe("fixed-session-id-for-team");
+    expect(config.instanceId).toBe("bob@laptop:demo/fixed-session-id-for-team");
+  });
+
+  it("uses CC2CC_SESSION_ID consistently across calls", async () => {
+    process.env.CC2CC_HUB_URL = "ws://localhost:3100";
+    process.env.CC2CC_API_KEY = "key";
+    process.env.CC2CC_SESSION_ID = "stable-id";
+
+    const { loadConfig } = await import("../src/config.ts");
+    const a = await loadConfig();
+    const b = await loadConfig();
+
+    expect(a.sessionId).toBe("stable-id");
+    expect(b.sessionId).toBe("stable-id");
   });
 
   it("generates a unique instanceId each call", async () => {

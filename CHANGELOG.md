@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Table of Contents
 
 - [Version Note](#version-note)
+- [0.2.3 — skill/plugin](#023--skillplugin)
 - [Unreleased](#unreleased)
 - [0.2.2 — skill](#022--skill)
 - [0.2.1 — hub/plugin/dashboard](#021--hubplugindashboard)
@@ -30,6 +31,15 @@ The project maintains two version numbers that serve different purposes:
 The two versions are intentionally separate and will diverge over time. The skill
 version advances more frequently (each skill or pattern change requires a bump);
 the monorepo version advances with hub/plugin/dashboard releases.
+
+---
+
+## [0.2.3] — skill/plugin
+
+### Added
+- `CC2CC_SESSION_ID` environment variable support in plugin — allows pre-assigning
+  a stable session ID per instance, bypassing the shared session file. Enables
+  team mode with multiple Claude instances in the same project directory.
 
 ---
 
@@ -179,7 +189,8 @@ the monorepo version advances with hub/plugin/dashboard releases.
 - `SessionStart` hook writes Claude session ID to `.claude/.cc2cc-session-id` for stable instance identity
 - Partial addressing: send to `username@host:project` without session segment
 
-[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/paulrobello/cc2cc/compare/skill-v0.2.2...v0.2.3
 [0.2.2]: https://github.com/paulrobello/cc2cc/releases/tag/skill-v0.2.2
 [0.2.1]: https://github.com/paulrobello/cc2cc/compare/v0.1.0...v0.2.1
 [0.1.0]: https://github.com/paulrobello/cc2cc/releases/tag/v0.1.0

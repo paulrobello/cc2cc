@@ -108,8 +108,9 @@ export async function loadConfig(): Promise<PluginConfig> {
 
   const project = env("CC2CC_PROJECT") || basename(process.cwd());
 
-  // Poll for the session file written by the SessionStart hook; fall back to UUID
-  const sessionId = (await pollSessionFile()) ?? randomUUID();
+  // Prefer explicit env var (used by cctmux team mode to avoid shared-file races),
+  // then poll for the session file written by the SessionStart hook, then fall back to UUID
+  const sessionId = env("CC2CC_SESSION_ID") || ((await pollSessionFile()) ?? randomUUID());
 
   const base = { hubUrl, apiKey, username, host, project };
   const instanceId = buildInstanceId(base, sessionId);

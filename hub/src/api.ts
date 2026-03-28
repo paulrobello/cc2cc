@@ -86,7 +86,7 @@ export function buildApiRoutes(app: Hono): void {
   // GET /api/messages/:id — fetch a stored message by messageId
   // Note: the hub doesn't maintain a separate message-by-ID store in v1.
   // This endpoint is a stub for dashboard inspection; returns 404 with a clear message.
-  app.get("/api/messages/:id", (c) => {
+  app.get("/api/messages/:id{.+}", (c) => {
     const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
 
@@ -102,7 +102,7 @@ export function buildApiRoutes(app: Hono): void {
   });
 
   // GET /api/ping/:id — check whether an instance is currently online
-  app.get("/api/ping/:id", (c) => {
+  app.get("/api/ping/:id{.+}", (c) => {
     const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
 
@@ -114,7 +114,7 @@ export function buildApiRoutes(app: Hono): void {
   });
 
   // DELETE /api/instances/:id — remove a stale offline instance from the registry
-  app.delete("/api/instances/:id", async (c) => {
+  app.delete("/api/instances/:id{.+}", async (c) => {
     const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
 
@@ -122,7 +122,8 @@ export function buildApiRoutes(app: Hono): void {
     const entry = registry.get(instanceId);
 
     if (!entry) {
-      return c.json({ error: "Instance not found" }, 404);
+      // Idempotent: already gone is success
+      return c.json({ removed: true, instanceId });
     }
     if (entry.status === "online") {
       return c.json({ error: "Cannot remove an online instance" }, 409);
@@ -141,7 +142,7 @@ export function buildApiRoutes(app: Hono): void {
   });
 
   // DELETE /api/queue/:id — flush a queue (admin)
-  app.delete("/api/queue/:id", async (c) => {
+  app.delete("/api/queue/:id{.+}", async (c) => {
     const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
 

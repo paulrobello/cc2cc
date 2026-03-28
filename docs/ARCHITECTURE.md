@@ -149,6 +149,12 @@ username@host:project/sessionId
 
 The `sessionId` is the Claude Code session ID — stable within a session, updated automatically on `/clear`. The plugin detects the new ID via a `SessionStart` hook and migrates queued messages to the new identity.
 
+**Multi-Instance / Team Mode:**
+
+When multiple Claude Code instances share the same project directory (e.g. team mode via `cctmux team`), the shared `.claude/.cc2cc-session-id` file creates a race condition — all instances would poll the same file and potentially adopt each other's session IDs.
+
+The `CC2CC_SESSION_ID` environment variable bypasses this. When set, `config.ts` uses its value directly as the session ID instead of reading from the file. Each instance receives a unique value from the launcher, producing distinct instance IDs even though they share the same `username@host:project` prefix.
+
 ---
 
 ### dashboard

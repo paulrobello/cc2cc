@@ -1,7 +1,7 @@
 ---
 name: cc2cc
 description: Claude-to-Claude collaboration — activate when collaborating with other Claude Code instances, delegating tasks, receiving inbound cc2cc messages, or coordinating via broadcast.
-version: 0.2.2
+version: 0.2.3
 ---
 
 <!--
@@ -347,6 +347,27 @@ your LAN with the key can send you messages. This means:
 - Be aware that the `from` field in a message is stamped by the hub (not the sender)
   — it cannot be spoofed by other instances. But the hub itself is LAN-trusted, so
   physical network security matters.
+
+---
+
+## Team Mode
+
+When running as part of a team (launched via `cctmux team`), your session includes
+a role-specific system prompt that tells you your specialization.
+
+**On session start in team mode:**
+
+1. Call `set_role('your-role')` immediately, using the role name from your system prompt
+   (e.g. `set_role('architect')`, `set_role('implementer')`).
+2. Call `list_instances()` to discover your teammates and their roles.
+3. Use `publish_topic` on your project topic for team-wide coordination messages
+   (status updates, task assignments, announcements).
+4. Use `send_message` for direct 1:1 communication with a specific teammate when
+   the message is relevant only to them.
+
+If `shared_task_list` is configured, all team members share a task list managed by
+the coordinating instance. Check inbound `task` messages for assignments and report
+back with `result` messages when complete.
 
 ---
 

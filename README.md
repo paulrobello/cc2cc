@@ -38,6 +38,7 @@
    * [Views](#views)
 * [Security](#security)
 * [Architecture](#architecture)
+* [Team Mode](#team-mode)
 * [FAQ](#faq)
 * [Related Documentation](#related-documentation)
 
@@ -136,6 +137,7 @@ make dev-dashboard
 | `NEXT_PUBLIC_CC2CC_HUB_API_KEY` | dashboard | no | — | API key for hub REST calls |
 | `CC2CC_DASHBOARD_ORIGIN` | hub | no | `*` | CORS origin for hub responses. Set to your dashboard URL (e.g. `http://192.168.1.10:8029`) to restrict cross-origin access. Defaults to `*` with a warning logged at startup. |
 | `CC2CC_REDIS_PASSWORD` | docker-compose | no | `changeme` | Redis auth password; docker-compose uses it to configure Redis and build `CC2CC_REDIS_URL` for the hub container |
+| `CC2CC_SESSION_ID` | plugin | no | — | Pre-assigned session ID — bypasses the shared `.cc2cc-session-id` file. Required for team mode (multiple instances in the same project directory). |
 | `CC2CC_HOST_LAN_IP` | docker-compose | no | `localhost` | LAN IP passed to the dashboard container |
 
 ### Instance Identity
@@ -519,6 +521,42 @@ graph TD
 ```
 
 For full architecture details — workspace layout, component responsibilities, WebSocket protocol, REST API, queue design, and design invariants — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Team Mode
+
+Team mode runs multiple Claude Code instances in the same project directory, each with a specialized role, communicating through cc2cc. It is launched via [cctmux](https://github.com/paulrobello/cctmux)'s `cctmux team` command.
+
+### How it works
+
+Each instance launched by `cctmux team` receives a unique `CC2CC_SESSION_ID` environment variable. This bypasses the shared `.claude/.cc2cc-session-id` file that the plugin normally polls, avoiding race conditions when multiple instances share the same working directory. All instances auto-subscribe to their project topic and use `set_role()` to declare their specialization.
+
+### Example `team.yaml`
+
+Team configuration is defined in a `team.yaml` file consumed by cctmux (not cc2cc):
+
+```yaml
+team:
+  shared_task_list: true
+  layout: grid
+  agents:
+    - role: architect
+      prompt: "Lead the team. Create tasks, review work, coordinate."
+    - role: implementer
+      prompt: "Pick up tasks and implement them."
+    - role: tester
+      prompt: "Write and run tests for completed features."
+```
+
+> **Note:** `team.yaml` is a cctmux configuration file. cc2cc itself provides only the communication layer — it has no knowledge of team definitions or role assignments.
+
+### Environment
+
+When `cctmux team` launches instances, it sets these env vars per pane:
+
+- `CC2CC_SESSION_ID` — unique per instance, avoids session file conflicts
+- `CC2CC_HUB_URL`, `CC2CC_API_KEY` — inherited from the parent shell
+
+No additional cc2cc configuration is needed beyond what a single-instance setup requires.
 
 ## FAQ
 

@@ -1,6 +1,6 @@
 {
   "name": "cc2cc",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Claude-to-Claude communications — collaborate with other Claude Code instances via typed messages.",
   "author": {
     "name": "Paul Robello",
@@ -18,7 +18,8 @@
   "optionalEnv": [
     "CC2CC_USERNAME",
     "CC2CC_HOST",
-    "CC2CC_PROJECT"
+    "CC2CC_PROJECT",
+    "CC2CC_SESSION_ID"
   ],
   "readme": "Install: add this plugin to your Claude Code project via `claude plugin add ./skill/plugin.json`.\nRequires the cc2cc hub to be running and CC2CC_HUB_URL + CC2CC_API_KEY to be set in your environment.\nSee the hub README for startup instructions."
 }

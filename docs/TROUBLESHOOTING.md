@@ -12,6 +12,7 @@ Common failure modes, diagnostic steps, and solutions for cc2cc.
 - [Topics Issues](#topics-issues)
 - [Docker Deployment Issues](#docker-deployment-issues)
 - [Skill and Plugin Installation Issues](#skill-and-plugin-installation-issues)
+- [Team Mode Issues](#team-mode-issues)
 - [Test Failures](#test-failures)
 - [Related Documentation](#related-documentation)
 
@@ -269,6 +270,32 @@ claude plugin add ./skill
 - `CC2CC_HUB_URL` — required, must be a `ws://` URL
 - `CC2CC_API_KEY` — required, must match `CC2CC_HUB_API_KEY` on the hub
 - `CC2CC_USERNAME`, `CC2CC_HOST`, `CC2CC_PROJECT` — optional, default to `$USER`, `$HOSTNAME`, `basename(cwd)`
+
+---
+
+## Team Mode Issues
+
+### Symptom: All instances have the same session ID
+
+**Cause:** `CC2CC_SESSION_ID` is not set uniquely per instance. Without it, all instances in the same project directory poll the shared `.claude/.cc2cc-session-id` file and adopt the same session ID.
+
+**Fix:** Ensure each instance has a unique `CC2CC_SESSION_ID` environment variable. When using `cctmux team`, this is handled automatically — each pane receives a distinct value. If launching manually, set a unique value per instance (e.g. `CC2CC_SESSION_ID=$(uuidgen)`).
+
+### Symptom: Instances not seeing each other
+
+**Cause:** Instances are connected to different hubs, or some instances failed to connect.
+
+**Fix:**
+
+1. Verify all instances use the same `CC2CC_HUB_URL` and `CC2CC_API_KEY`.
+2. Call `list_instances()` from any connected instance to see who is registered.
+3. Check the hub health endpoint: `curl http://<hub>:3100/health`
+
+### Symptom: Messages not delivered between team members
+
+**Cause:** The recipient `instanceId` is stale or incorrect. In team mode, multiple instances share the same `username@host:project` prefix, so partial addressing may fail with an ambiguity error.
+
+**Fix:** Always call `list_instances()` to get current full instance IDs before sending. Use the full `instanceId` (including the session segment) for direct messages. For team-wide communication, use `publish_topic` on the project topic instead.
 
 ---
 

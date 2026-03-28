@@ -140,6 +140,7 @@ Optional env: `CC2CC_USERNAME`, `CC2CC_HOST`, `CC2CC_PROJECT`
 | `CC2CC_USERNAME` | plugin | no | `$USER` |
 | `CC2CC_HOST` | plugin | no | `$HOSTNAME` |
 | `CC2CC_PROJECT` | plugin | no | `basename(cwd)` |
+| `CC2CC_SESSION_ID` | plugin | no | polls `.claude/.cc2cc-session-id`, then UUIDv4 |
 | `NEXT_PUBLIC_CC2CC_HUB_WS_URL` | dashboard | no | `ws://localhost:3100` |
 | `NEXT_PUBLIC_CC2CC_HUB_API_KEY` | dashboard | no | — |
 | `CC2CC_HOST_LAN_IP` | docker-compose | no | `localhost` |
