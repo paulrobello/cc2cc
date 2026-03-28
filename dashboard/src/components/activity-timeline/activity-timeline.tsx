@@ -163,28 +163,40 @@ export function ActivityTimeline({
 
                 {/* Bucket cells */}
                 <div className="flex flex-1 gap-px">
-                  {buckets.map((dots, bucketIdx) => (
-                    <div
-                      key={bucketIdx}
-                      className="relative flex h-7 flex-1 items-center justify-center"
-                      style={{
-                        background:
-                          dots.length > 0
-                            ? "rgba(0,212,255,0.03)"
-                            : "#070f1e",
-                        border: "1px solid #1a3356",
-                      }}
-                    >
-                      {dots.slice(0, 3).map((dot, dotIdx) => (
-                        <Tooltip key={dotIdx}>
+                  {buckets.map((dots, bucketIdx) => {
+                    const hasActivity = dots.length > 0;
+                    return hasActivity ? (
+                        <Tooltip key={bucketIdx}>
                           <TooltipTrigger>
-                            <span
-                              className={cn(
-                                "inline-block h-1.5 w-1.5 rounded-full cursor-default",
-                                dot.color.replace("text-", "bg-"),
+                            <div
+                              className="relative flex h-7 items-center justify-center gap-0.5 cursor-default"
+                              style={{
+                                background: "rgba(0,212,255,0.10)",
+                                border: "1px solid rgba(0,212,255,0.25)",
+                              }}
+                            >
+                              {dots.slice(0, 3).map((dot, dotIdx) => (
+                                <span
+                                  key={dotIdx}
+                                  className={cn(
+                                    "inline-block h-2 w-2 rounded-full",
+                                    dot.color.replace("text-", "bg-"),
+                                  )}
+                                  style={{
+                                    boxShadow: "0 0 4px currentColor",
+                                  }}
+                                  aria-label={`${dot.label}: ${dot.content}`}
+                                />
+                              ))}
+                              {dots.length > 3 && (
+                                <span
+                                  className="font-mono text-[8px] font-bold"
+                                  style={{ color: "#00d4ff" }}
+                                >
+                                  +{dots.length - 3}
+                                </span>
                               )}
-                              aria-label={`${dot.label}: ${dot.content}`}
-                            />
+                            </div>
                           </TooltipTrigger>
                           <TooltipContent
                             side="top"
@@ -195,23 +207,27 @@ export function ActivityTimeline({
                               color: "#c8d8e8",
                             }}
                           >
-                            <p className="font-bold uppercase tracking-wider" style={{ color: "#00d4ff" }}>
-                              {dot.label}
-                            </p>
-                            <p style={{ color: "#6b8aaa" }}>{dot.content}</p>
+                            {dots.map((dot, dotIdx) => (
+                              <div key={dotIdx} className={dotIdx > 0 ? "mt-1 border-t border-[#1a3356] pt-1" : ""}>
+                                <p className="font-bold uppercase tracking-wider" style={{ color: "#00d4ff" }}>
+                                  {dot.label}
+                                </p>
+                                <p style={{ color: "#6b8aaa" }}>{dot.content}</p>
+                              </div>
+                            ))}
                           </TooltipContent>
                         </Tooltip>
-                      ))}
-                      {dots.length > 3 && (
-                        <span
-                          className="absolute bottom-0.5 right-0.5 font-mono text-[8px]"
-                          style={{ color: "#2a5480" }}
-                        >
-                          +{dots.length - 3}
-                        </span>
-                      )}
-                    </div>
-                  ))}
+                      ) : (
+                        <div
+                          key={bucketIdx}
+                          className="flex h-7 flex-1 items-center justify-center"
+                          style={{
+                            background: "#070f1e",
+                            border: "1px solid #1a3356",
+                          }}
+                        />
+                      );
+                  })}
                 </div>
               </div>
             );

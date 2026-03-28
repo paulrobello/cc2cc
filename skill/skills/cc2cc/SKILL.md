@@ -1,7 +1,7 @@
 ---
 name: cc2cc
 description: Claude-to-Claude collaboration — activate when collaborating with other Claude Code instances, delegating tasks, receiving inbound cc2cc messages, or coordinating via broadcast.
-version: 0.2.3
+version: 0.2.4
 ---
 
 <!--

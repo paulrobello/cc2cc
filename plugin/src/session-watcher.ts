@@ -34,6 +34,11 @@ export interface SessionWatcherCallbacks {
  * When a new session ID is detected, notifies the hub via session_update,
  * updates the config in-place, and reconnects with the new identity.
  *
+ * When CC2CC_SESSION_ID is set (team mode), the session ID is externally
+ * managed and the watcher is disabled — all instances in the same directory
+ * share the session file, so reacting to it would cause them to converge
+ * on a single identity.
+ *
  * Uses fs.watchFile (poll-based, tolerates non-existent files).
  * Returns an unwatcher function that should be called on graceful shutdown.
  */
@@ -42,6 +47,13 @@ export function watchSession(
   state: SessionWatcherState,
   callbacks: SessionWatcherCallbacks,
 ): () => void {
+  // When CC2CC_SESSION_ID is set, the session ID is externally managed (e.g.
+  // by cctmux team mode). Skip the file watcher to prevent all instances in
+  // the same project directory from converging on a single session ID.
+  if (process.env.CC2CC_SESSION_ID) {
+    return () => {}; // no-op unwatcher
+  }
+
   const sessionFile = path.join(process.cwd(), ".claude", ".cc2cc-session-id");
   let currentSessionId = config.sessionId;
   let active = false;

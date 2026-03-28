@@ -1,6 +1,6 @@
 {
   "name": "cc2cc",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Claude-to-Claude communications — collaborate with other Claude Code instances via typed messages.",
   "author": {
     "name": "Paul Robello",

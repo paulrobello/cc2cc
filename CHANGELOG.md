@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Table of Contents
 
 - [Version Note](#version-note)
+- [0.2.4 — plugin/dashboard](#024--plugindashboard)
 - [0.2.3 — skill/plugin](#023--skillplugin)
 - [Unreleased](#unreleased)
 - [0.2.2 — skill](#022--skill)
@@ -31,6 +32,19 @@ The project maintains two version numbers that serve different purposes:
 The two versions are intentionally separate and will diverge over time. The skill
 version advances more frequently (each skill or pattern change requires a bump);
 the monorepo version advances with hub/plugin/dashboard releases.
+
+---
+
+## [0.2.4] — plugin/dashboard
+
+### Fixed
+- **Team mode session collision:** session file watcher now disabled when
+  `CC2CC_SESSION_ID` is set — previously all team instances in the same project
+  directory watched the shared `.cc2cc-session-id` file and converged to a single
+  identity, causing the dashboard to show only 1 of N instances.
+- **Activity grid visibility:** cells with events now have a visible highlighted
+  background and border instead of near-invisible styling; dots enlarged with glow
+  effect; tooltip shows all events in the bucket (not just the first 3).
 
 ---
 
@@ -189,7 +203,8 @@ the monorepo version advances with hub/plugin/dashboard releases.
 - `SessionStart` hook writes Claude session ID to `.claude/.cc2cc-session-id` for stable instance identity
 - Partial addressing: send to `username@host:project` without session segment
 
-[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/paulrobello/cc2cc/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/paulrobello/cc2cc/compare/skill-v0.2.2...v0.2.3
 [0.2.2]: https://github.com/paulrobello/cc2cc/releases/tag/skill-v0.2.2
 [0.2.1]: https://github.com/paulrobello/cc2cc/compare/v0.1.0...v0.2.1
