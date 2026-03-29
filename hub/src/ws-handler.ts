@@ -2,6 +2,7 @@
 import type { ServerWebSocket } from "bun";
 import type { Message } from "@cc2cc/shared";
 import {
+  MessageType,
   SendMessageInputSchema,
   BroadcastInputSchema,
   SessionUpdateActionSchema,
@@ -176,6 +177,23 @@ export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
     instanceId,
     timestamp: new Date().toISOString(),
   });
+
+  // Nudge: if the instance has no role set, send a prompt so agents with a
+  // system-prompt-assigned role call set_role immediately after connecting
+  // (without waiting for a user message to trigger action).
+  const entry = registry.get(instanceId);
+  if (!entry?.role) {
+    const nudge: Message = {
+      messageId: randomUUID(),
+      from: `system@hub:cc2cc/${randomUUID()}`,
+      to: instanceId,
+      type: MessageType.ping,
+      content:
+        "You are now connected to the cc2cc hub. If you have been assigned a role, please call the set_role tool now to announce it. Do not reply to this message.",
+      timestamp: new Date().toISOString(),
+    };
+    ws.send(JSON.stringify(nudge));
+  }
 
   console.log(`[ws] plugin connected: ${instanceId}`);
 }
