@@ -140,6 +140,7 @@ export default function CommandCenterPage() {
           <MessageFeed
             feed={feed}
             filterInstanceId={selectedInstanceId}
+            instances={instances}
             topics={topics}
             feedFilter={feedFilter}
             onFilterChange={setFeedFilter}

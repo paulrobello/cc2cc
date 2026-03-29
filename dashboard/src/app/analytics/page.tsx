@@ -159,6 +159,7 @@ export default function AnalyticsPage() {
             <MessageFeed
               feed={recent}
               filterInstanceId={null}
+              instances={instances}
               topics={topics}
               feedFilter={feedFilter}
               onFilterChange={setFeedFilter}

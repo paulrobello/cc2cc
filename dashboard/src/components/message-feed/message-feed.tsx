@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MessageRow } from "./message-row";
 import { cn } from "@/lib/utils";
-import type { FeedMessage, TopicState } from "@/types/dashboard";
+import type { FeedMessage, InstanceState, TopicState } from "@/types/dashboard";
 import { MessageType } from "@cc2cc/shared";
 
 type FilterType = "all" | MessageType | "broadcast";
@@ -21,6 +21,7 @@ const FILTER_CHIPS: { label: string; value: FilterType }[] = [
 interface MessageFeedProps {
   feed: FeedMessage[];
   filterInstanceId?: string | null;
+  instances?: Map<string, InstanceState>;
   topics?: Map<string, TopicState>;
   feedFilter?: { kind: "all" | "direct" | "broadcast" | "topic"; topicName?: string };
   onFilterChange?: (f: { kind: "all" | "direct" | "broadcast" | "topic"; topicName?: string }) => void;
@@ -29,6 +30,7 @@ interface MessageFeedProps {
 export function MessageFeed({
   feed,
   filterInstanceId,
+  instances,
   topics,
   feedFilter,
   onFilterChange,
@@ -175,7 +177,7 @@ export function MessageFeed({
                 key={entry.message.messageId}
                 style={{ borderBottom: "1px solid rgba(26,51,86,0.5)" }}
               >
-                <MessageRow entry={entry} />
+                <MessageRow entry={entry} senderRole={instances?.get(entry.message.from)?.role} />
               </div>
             ))}
           </div>

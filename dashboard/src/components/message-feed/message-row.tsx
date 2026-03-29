@@ -12,9 +12,10 @@ import type { FeedMessage } from "@/types/dashboard";
 
 interface MessageRowProps {
   entry: FeedMessage;
+  senderRole?: string;
 }
 
-export function MessageRow({ entry }: MessageRowProps) {
+export function MessageRow({ entry, senderRole }: MessageRowProps) {
   const { message, isBroadcast } = entry;
   const color = messageTypeColor(message.type, isBroadcast);
   const classes = messageColorClasses(color);
@@ -46,6 +47,14 @@ export function MessageRow({ entry }: MessageRowProps) {
           <span className={cn("font-semibold", classes.text)}>
             {shortInstanceId(message.from)}
           </span>
+          {senderRole && (
+            <span
+              className="ml-1 rounded px-1 py-px text-[9px] font-medium uppercase tracking-wider"
+              style={{ background: "rgba(0,212,255,0.1)", color: "#00d4ff", border: "1px solid rgba(0,212,255,0.2)" }}
+            >
+              {senderRole}
+            </span>
+          )}
           <span className="mx-1.5" style={{ color: "#2a5480" }}>
             ▶
           </span>
