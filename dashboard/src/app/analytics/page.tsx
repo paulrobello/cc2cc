@@ -62,6 +62,9 @@ export default function AnalyticsPage() {
     },
   ];
 
+  const windowOptions = [1, 3, 5, 10] as const;
+  const [windowMinutes, setWindowMinutes] = useState<number>(5);
+
   const recent = [...feed].reverse().slice(0, 20);
 
   return (
@@ -82,9 +85,26 @@ export default function AnalyticsPage() {
               className="text-[9px] font-bold uppercase tracking-[0.25em]"
               style={{ color: "#2a5480" }}
             >
-              ◈ Node Activity — Last {10} Min
+              ◈ Node Activity — Last {windowMinutes} Min
             </h2>
             <div className="flex items-center gap-3">
+              {/* Time span selector */}
+              <select
+                value={windowMinutes}
+                onChange={(e) => setWindowMinutes(Number(e.target.value))}
+                className="cursor-pointer appearance-none rounded border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider outline-none"
+                style={{
+                  background: "#0d1f38",
+                  border: "1px solid #2a5480",
+                  color: "#00d4ff",
+                }}
+              >
+                {windowOptions.map((min) => (
+                  <option key={min} value={min}>
+                    {min}m
+                  </option>
+                ))}
+              </select>
               {[
                 { label: "Task", color: "#f59e0b" },
                 { label: "Result", color: "#34d399" },
@@ -108,7 +128,7 @@ export default function AnalyticsPage() {
             <ActivityTimeline
               instances={instances}
               feed={feed}
-              windowMinutes={10}
+              windowMinutes={windowMinutes}
             />
           </div>
         </div>
