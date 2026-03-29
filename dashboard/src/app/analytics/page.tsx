@@ -1,7 +1,7 @@
 // dashboard/src/app/analytics/page.tsx
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useWs } from "@/hooks/use-ws";
 import { StatsBar } from "@/components/stats-bar/stats-bar";
 import { ActivityTimeline } from "@/components/activity-timeline/activity-timeline";
@@ -63,15 +63,28 @@ export default function AnalyticsPage() {
   ];
 
   const windowOptions = [1, 3, 5, 10] as const;
-  const [windowMinutes, setWindowMinutes] = useState<number>(() => {
-    if (typeof window === "undefined") return 5;
-    const stored = localStorage.getItem("cc2cc:analytics:windowMinutes");
-    const parsed = stored ? Number(stored) : NaN;
-    return (windowOptions as readonly number[]).includes(parsed) ? parsed : 5;
-  });
+  const STORAGE_KEY = "cc2cc:analytics:windowMinutes";
+  const DEFAULT_WINDOW = 5;
+
+  const windowMinutes = useSyncExternalStore(
+    (onStoreChange) => {
+      const handler = (e: StorageEvent) => {
+        if (e.key === STORAGE_KEY) onStoreChange();
+      };
+      window.addEventListener("storage", handler);
+      return () => window.removeEventListener("storage", handler);
+    },
+    () => {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      const parsed = stored ? Number(stored) : NaN;
+      return (windowOptions as readonly number[]).includes(parsed) ? parsed : DEFAULT_WINDOW;
+    },
+    () => DEFAULT_WINDOW,
+  );
   const handleWindowChange = useCallback((v: number) => {
-    setWindowMinutes(v);
-    localStorage.setItem("cc2cc:analytics:windowMinutes", String(v));
+    localStorage.setItem(STORAGE_KEY, String(v));
+    // Force re-render since useSyncExternalStore only reacts to storage events from other tabs
+    window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY }));
   }, []);
 
   const recent = [...feed].reverse().slice(0, 20);
