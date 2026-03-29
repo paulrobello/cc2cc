@@ -1,7 +1,7 @@
 // dashboard/src/app/analytics/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useWs } from "@/hooks/use-ws";
 import { StatsBar } from "@/components/stats-bar/stats-bar";
 import { ActivityTimeline } from "@/components/activity-timeline/activity-timeline";
@@ -63,7 +63,16 @@ export default function AnalyticsPage() {
   ];
 
   const windowOptions = [1, 3, 5, 10] as const;
-  const [windowMinutes, setWindowMinutes] = useState<number>(5);
+  const [windowMinutes, setWindowMinutes] = useState<number>(() => {
+    if (typeof window === "undefined") return 5;
+    const stored = localStorage.getItem("cc2cc:analytics:windowMinutes");
+    const parsed = stored ? Number(stored) : NaN;
+    return (windowOptions as readonly number[]).includes(parsed) ? parsed : 5;
+  });
+  const handleWindowChange = useCallback((v: number) => {
+    setWindowMinutes(v);
+    localStorage.setItem("cc2cc:analytics:windowMinutes", String(v));
+  }, []);
 
   const recent = [...feed].reverse().slice(0, 20);
 
@@ -91,7 +100,7 @@ export default function AnalyticsPage() {
               {/* Time span selector */}
               <select
                 value={windowMinutes}
-                onChange={(e) => setWindowMinutes(Number(e.target.value))}
+                onChange={(e) => handleWindowChange(Number(e.target.value))}
                 className="cursor-pointer appearance-none rounded border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider outline-none"
                 style={{
                   background: "#0d1f38",

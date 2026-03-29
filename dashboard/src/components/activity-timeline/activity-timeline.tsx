@@ -1,7 +1,7 @@
 // dashboard/src/components/activity-timeline/activity-timeline.tsx
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   cn,
   messageTypeColor,
@@ -54,9 +54,11 @@ export function ActivityTimeline({
 
   // Periodic re-render only to add/remove dots and expired instances.
   // The actual dot motion is handled by CSS @keyframes animation.
-  const [, setTick] = useState(0);
+  // nowMs is captured here (outside useMemo) so the React compiler
+  // doesn't flag Date.now() as an impure call inside a memo.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 5_000);
+    const id = setInterval(() => setNowMs(Date.now()), 5_000);
     return () => clearInterval(id);
   }, []);
 
@@ -66,24 +68,13 @@ export function ActivityTimeline({
     setCollapsed((prev) => ({ ...prev, [project]: !prev[project] }));
   }, []);
 
-  /**
-   * Stable animation-delay cache.
-   * Each dot key maps to the negative delay (in ms) computed the first time
-   * the dot appeared. Re-renders reuse the stored value so the CSS animation
-   * is never restarted.
-   */
-  const stableDelays = useRef(new Map<string, number>());
-
   /** Map of instanceId -> dots with birth timestamps. */
   const dotMap = useMemo(() => {
-    const nowMs = Date.now();
     const map = new Map<string, DotData[]>();
 
     for (const inst of instances.values()) {
       map.set(inst.instanceId, []);
     }
-
-    const activeKeys = new Set<string>();
 
     for (const entry of feed) {
       const birthMs = entry.receivedAt.getTime();
@@ -102,12 +93,6 @@ export function ActivityTimeline({
           entry.isBroadcast,
         );
         const key = `${entry.message.messageId}-${targetId}`;
-        activeKeys.add(key);
-
-        // Store animation delay on first appearance; reuse on subsequent renders
-        if (!stableDelays.current.has(key)) {
-          stableDelays.current.set(key, -(nowMs - birthMs));
-        }
 
         dots.push({
           key,
@@ -119,13 +104,8 @@ export function ActivityTimeline({
       }
     }
 
-    // Purge stale delay entries
-    for (const k of stableDelays.current.keys()) {
-      if (!activeKeys.has(k)) stableDelays.current.delete(k);
-    }
-
     return map;
-  }, [instances, feed, windowMs]);
+  }, [instances, feed, windowMs, nowMs]);
 
   /** Group instances by project, sorted alphabetically. */
   const projectGroups = useMemo(() => {
@@ -310,8 +290,7 @@ export function ActivityTimeline({
                             }}
                           >
                             {dots.map((dot) => {
-                              const delayMs =
-                                stableDelays.current.get(dot.key) ?? 0;
+                              const delayMs = dot.birthMs - nowMs;
                               return (
                                 <Tooltip key={dot.key}>
                                   <TooltipTrigger
@@ -324,7 +303,11 @@ export function ActivityTimeline({
                                       display: "flex",
                                       alignItems: "center",
                                       justifyContent: "center",
-                                      animation: `lane-drift ${windowMs}ms linear 1 both`,
+                                      animationName: "lane-drift",
+                                      animationDuration: `${windowMs}ms`,
+                                      animationTimingFunction: "linear",
+                                      animationIterationCount: 1,
+                                      animationFillMode: "both",
                                       animationDelay: `${delayMs}ms`,
                                     }}
                                   >

@@ -129,13 +129,26 @@ export function buildApiRoutes(app: Hono): void {
       return c.json({ error: "Cannot remove an online instance" }, 409);
     }
 
+    // Unsubscribe from all topics before removing the instance
+    const topics = await topicManager.getTopicsForInstance(instanceId);
+    const ts = new Date().toISOString();
+    for (const topic of topics) {
+      await topicManager.unsubscribe(topic, instanceId, true);
+      emitToDashboards({
+        event: "topic:unsubscribed",
+        name: topic,
+        instanceId,
+        timestamp: ts,
+      });
+    }
+
     await flushQueue(instanceId);
     await registry.deregister(instanceId);
 
     emitToDashboards({
       event: "instance:removed",
       instanceId,
-      timestamp: new Date().toISOString(),
+      timestamp: ts,
     });
 
     return c.json({ removed: true, instanceId });

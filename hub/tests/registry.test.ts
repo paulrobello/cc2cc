@@ -200,7 +200,10 @@ describe("registry.deregister", () => {
   it("deletes the Redis presence key", async () => {
     await registry.register("alice@srv:api/abc", "api");
     await registry.deregister("alice@srv:api/abc");
-    expect(redisMock.del).toHaveBeenCalledWith("instance:alice@srv:api/abc");
+    expect(redisMock.del).toHaveBeenCalledWith(
+      "instance:alice@srv:api/abc",
+      "instance:alice@srv:api/abc:topics",
+    );
   });
 
   it("is a no-op for unknown instances", async () => {

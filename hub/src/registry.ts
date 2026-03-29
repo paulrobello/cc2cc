@@ -165,7 +165,7 @@ export const registry = {
    */
   async deregister(instanceId: string): Promise<void> {
     _map.delete(instanceId);
-    await redis.del(`instance:${instanceId}`);
+    await redis.del(`instance:${instanceId}`, `instance:${instanceId}:topics`);
   },
 
   /**
