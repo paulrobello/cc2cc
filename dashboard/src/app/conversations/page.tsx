@@ -37,7 +37,7 @@ export default function ConversationsPage() {
     <div className="flex h-[calc(100vh-3rem)] overflow-hidden">
       {/* Left: node picker */}
       <div
-        className="flex w-60 flex-col"
+        className="flex w-80 flex-col"
         style={{ background: "#070f1e", borderRight: "1px solid #1a3356" }}
       >
         <div
@@ -125,6 +125,17 @@ export default function ConversationsPage() {
                     <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
                       {shortInstanceId(inst.instanceId)}
                     </span>
+                    {inst.role && (
+                      <span
+                        className="shrink-0 rounded px-1 font-mono text-[9px]"
+                        style={{
+                          background: "rgba(0,212,255,0.08)",
+                          color: "#00d4ff",
+                        }}
+                      >
+                        [{inst.role}]
+                      </span>
+                    )}
                     {isA && (
                       <span
                         className="shrink-0 font-mono text-[10px] font-bold"
