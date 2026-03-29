@@ -27,71 +27,91 @@ function instanceProject(inst: InstanceState): string {
   return inst.project || "unknown";
 }
 
+/** Hex colors for activity dots — keyed by MessageTypeColor token. */
+const dotColors: Record<MessageTypeColor, string> = {
+  amber: "#f59e0b",
+  green: "#34d399",
+  blue: "#60a5fa",
+  purple: "#c084fc",
+  zinc: "#94a3b8",
+};
+
+interface DotData {
+  key: string;
+  /** Birth timestamp (ms since epoch) — immutable, drives the CSS animation. */
+  birthMs: number;
+  hex: string;
+  label: string;
+  content: string;
+}
+
 export function ActivityTimeline({
   instances,
   feed,
   windowMinutes = 10,
 }: ActivityTimelineProps) {
-  const BUCKET_COUNT = 20;
   const windowMs = windowMinutes * 60 * 1000;
-  const bucketMs = windowMs / BUCKET_COUNT;
 
-  // Track wall-clock "now" with a stable ref updated by a 5-second interval.
-  // eslint-disable-next-line react-hooks/purity -- Date.now() in useRef is safe: the initial value is only evaluated once
-  const nowMsRef = useRef(Date.now());
+  // Periodic re-render only to add/remove dots and expired instances.
+  // The actual dot motion is handled by CSS @keyframes animation.
   const [, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => {
-      nowMsRef.current = Date.now();
-      setTick((t) => t + 1);
-    }, 5_000);
+    const id = setInterval(() => setTick((t) => t + 1), 5_000);
     return () => clearInterval(id);
   }, []);
 
-  /** Collapsed project sections (project name → collapsed). */
+  /** Collapsed project sections (project name -> collapsed). */
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const toggleCollapsed = useCallback((project: string) => {
     setCollapsed((prev) => ({ ...prev, [project]: !prev[project] }));
   }, []);
 
-  /** Hex colors for activity dots — keyed by MessageTypeColor token. */
-  const dotColors: Record<MessageTypeColor, string> = {
-    amber: "#f59e0b",
-    green: "#34d399",
-    blue: "#60a5fa",
-    purple: "#c084fc",
-    zinc: "#94a3b8",
-  };
+  /**
+   * Stable animation-delay cache.
+   * Each dot key maps to the negative delay (in ms) computed the first time
+   * the dot appeared. Re-renders reuse the stored value so the CSS animation
+   * is never restarted.
+   */
+  const stableDelays = useRef(new Map<string, number>());
 
-  const grid = useMemo(() => {
-    const nowMs = nowMsRef.current;
-    type BucketEntry = { hex: string; label: string; content: string };
-    const map = new Map<string, BucketEntry[][]>();
+  /** Map of instanceId -> dots with birth timestamps. */
+  const dotMap = useMemo(() => {
+    const nowMs = Date.now();
+    const map = new Map<string, DotData[]>();
 
     for (const inst of instances.values()) {
-      map.set(
-        inst.instanceId,
-        Array.from({ length: BUCKET_COUNT }, () => []),
-      );
+      map.set(inst.instanceId, []);
     }
 
-    for (const entry of feed) {
-      const entryMs = entry.receivedAt.getTime();
-      const age = nowMs - entryMs;
-      if (age < 0 || age > windowMs) continue;
+    const activeKeys = new Set<string>();
 
-      const bucketIndex = Math.floor((windowMs - age) / bucketMs);
-      const clampedIndex = Math.min(bucketIndex, BUCKET_COUNT - 1);
+    for (const entry of feed) {
+      const birthMs = entry.receivedAt.getTime();
+      const age = nowMs - birthMs;
+      if (age < 0 || age > windowMs) continue;
 
       const targetId =
         entry.message.to !== "broadcast" && instances.has(entry.message.to)
           ? entry.message.to
           : entry.message.from;
 
-      const bucket = map.get(targetId);
-      if (bucket) {
-        const colorToken = messageTypeColor(entry.message.type, entry.isBroadcast);
-        bucket[clampedIndex].push({
+      const dots = map.get(targetId);
+      if (dots) {
+        const colorToken = messageTypeColor(
+          entry.message.type,
+          entry.isBroadcast,
+        );
+        const key = `${entry.message.messageId}-${targetId}`;
+        activeKeys.add(key);
+
+        // Store animation delay on first appearance; reuse on subsequent renders
+        if (!stableDelays.current.has(key)) {
+          stableDelays.current.set(key, -(nowMs - birthMs));
+        }
+
+        dots.push({
+          key,
+          birthMs,
           hex: dotColors[colorToken],
           label: entry.isBroadcast ? "broadcast" : entry.message.type,
           content: entry.message.content.slice(0, 80),
@@ -99,8 +119,13 @@ export function ActivityTimeline({
       }
     }
 
+    // Purge stale delay entries
+    for (const k of stableDelays.current.keys()) {
+      if (!activeKeys.has(k)) stableDelays.current.delete(k);
+    }
+
     return map;
-  }, [instances, feed, windowMs, bucketMs]);
+  }, [instances, feed, windowMs]);
 
   /** Group instances by project, sorted alphabetically. */
   const projectGroups = useMemo(() => {
@@ -114,7 +139,6 @@ export function ActivityTimeline({
         groups.set(proj, [inst]);
       }
     }
-    // Sort projects alphabetically, instances within each group alphabetically
     const sorted = Array.from(groups.entries()).sort(([a], [b]) =>
       a.localeCompare(b),
     );
@@ -141,7 +165,15 @@ export function ActivityTimeline({
 
   return (
     <TooltipProvider>
-      <div className="overflow-x-auto">
+      {/* Inject keyframes — animation goes from right edge (100%) to left edge (0%) */}
+      <style>{`
+        @keyframes lane-drift {
+          from { left: 100%; }
+          to   { left: 0%; }
+        }
+      `}</style>
+
+      <div>
         {/* Time axis */}
         <div className="mb-2">
           <div className="flex">
@@ -158,7 +190,6 @@ export function ActivityTimeline({
               now
             </span>
           </div>
-          {/* Tick line */}
           <div
             className="mt-0.5 h-px"
             style={{
@@ -215,13 +246,13 @@ export function ActivityTimeline({
 
                 {/* Collapsible instance rows */}
                 {!isCollapsed && (
-                  <div className="space-y-2 pl-3">
+                  <div className="space-y-1 pl-3">
                     {projectInstances.map((inst) => {
-                      const buckets = grid.get(inst.instanceId) ?? [];
+                      const dots = dotMap.get(inst.instanceId) ?? [];
                       const isOnline = inst.status === "online";
                       return (
                         <div key={inst.instanceId}>
-                          {/* Instance label — above grid */}
+                          {/* Instance label */}
                           <div className="mb-0.5 flex items-center gap-1.5">
                             <span className="relative flex h-2 w-2 shrink-0">
                               {isOnline && (
@@ -269,43 +300,45 @@ export function ActivityTimeline({
                             </span>
                           </div>
 
-                          {/* Bucket cells */}
-                          <div className="flex flex-1 gap-px">
-                            {buckets.map((dots, bucketIdx) => {
-                              const hasActivity = dots.length > 0;
-                              return hasActivity ? (
-                                <Tooltip key={bucketIdx}>
-                                  <TooltipTrigger>
-                                    <div
-                                      className="relative flex h-7 items-center justify-center gap-0.5 cursor-default"
+                          {/* Continuous timeline lane */}
+                          <div
+                            className="relative h-7 w-full overflow-hidden"
+                            style={{
+                              background: "#070f1e",
+                              border: "1px solid #1a3356",
+                              borderRadius: "2px",
+                            }}
+                          >
+                            {dots.map((dot) => {
+                              const delayMs =
+                                stableDelays.current.get(dot.key) ?? 0;
+                              return (
+                                <Tooltip key={dot.key}>
+                                  <TooltipTrigger
+                                    className="absolute cursor-default"
+                                    style={{
+                                      top: 0,
+                                      width: "14px",
+                                      height: "100%",
+                                      marginLeft: "-7px",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      animation: `lane-drift ${windowMs}ms linear 1 both`,
+                                      animationDelay: `${delayMs}ms`,
+                                    }}
+                                  >
+                                    <span
+                                      className="block h-2.5 w-2.5 rounded-full"
                                       style={{
-                                        background: `${dots[0].hex}12`,
-                                        border: `1px solid ${dots[0].hex}40`,
+                                        background: dot.hex,
+                                        boxShadow: `0 0 6px ${dot.hex}, 0 0 2px ${dot.hex}`,
                                       }}
-                                    >
-                                      {dots.slice(0, 3).map((dot, dotIdx) => (
-                                        <span
-                                          key={dotIdx}
-                                          className="inline-block h-2 w-2 rounded-full"
-                                          style={{
-                                            background: dot.hex,
-                                            boxShadow: `0 0 4px ${dot.hex}`,
-                                          }}
-                                          aria-label={`${dot.label}: ${dot.content}`}
-                                        />
-                                      ))}
-                                      {dots.length > 3 && (
-                                        <span
-                                          className="font-mono text-[8px] font-bold"
-                                          style={{ color: "#00d4ff" }}
-                                        >
-                                          +{dots.length - 3}
-                                        </span>
-                                      )}
-                                    </div>
+                                    />
                                   </TooltipTrigger>
                                   <TooltipContent
                                     side="top"
+                                    align="center"
                                     className="max-w-xs text-xs"
                                     style={{
                                       background: "#0d1f38",
@@ -313,37 +346,17 @@ export function ActivityTimeline({
                                       color: "#c8d8e8",
                                     }}
                                   >
-                                    {dots.map((dot, dotIdx) => (
-                                      <div
-                                        key={dotIdx}
-                                        className={
-                                          dotIdx > 0
-                                            ? "mt-1 border-t border-[#1a3356] pt-1"
-                                            : ""
-                                        }
-                                      >
-                                        <p
-                                          className="font-bold uppercase tracking-wider"
-                                          style={{ color: dot.hex }}
-                                        >
-                                          {dot.label}
-                                        </p>
-                                        <p style={{ color: "#6b8aaa" }}>
-                                          {dot.content}
-                                        </p>
-                                      </div>
-                                    ))}
+                                    <p
+                                      className="font-bold uppercase tracking-wider"
+                                      style={{ color: dot.hex }}
+                                    >
+                                      {dot.label}
+                                    </p>
+                                    <p style={{ color: "#6b8aaa" }}>
+                                      {dot.content}
+                                    </p>
                                   </TooltipContent>
                                 </Tooltip>
-                              ) : (
-                                <div
-                                  key={bucketIdx}
-                                  className="flex h-7 flex-1 items-center justify-center"
-                                  style={{
-                                    background: "#070f1e",
-                                    border: "1px solid #1a3356",
-                                  }}
-                                />
                               );
                             })}
                           </div>
