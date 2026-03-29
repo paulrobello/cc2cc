@@ -75,7 +75,7 @@ export default function AnalyticsPage() {
           style={{ borderBottom: "1px solid #1a3356", maxHeight: "40vh" }}
         >
           <div
-            className="px-4 py-2"
+            className="flex items-center justify-between px-4 py-2"
             style={{ borderBottom: "1px solid #1a3356", background: "#070f1e" }}
           >
             <h2
@@ -84,6 +84,25 @@ export default function AnalyticsPage() {
             >
               ◈ Node Activity — Last {10} Min
             </h2>
+            <div className="flex items-center gap-3">
+              {[
+                { label: "Task", color: "#f59e0b" },
+                { label: "Result", color: "#34d399" },
+                { label: "Question", color: "#60a5fa" },
+                { label: "Broadcast", color: "#c084fc" },
+                { label: "Ack/Ping", color: "#94a3b8" },
+              ].map((item) => (
+                <span key={item.label} className="flex items-center gap-1">
+                  <span
+                    className="inline-block h-1.5 w-1.5 rounded-full"
+                    style={{ background: item.color, boxShadow: `0 0 3px ${item.color}` }}
+                  />
+                  <span className="font-mono text-[8px] uppercase tracking-wider" style={{ color: item.color }}>
+                    {item.label}
+                  </span>
+                </span>
+              ))}
+            </div>
           </div>
           <div className="p-4">
             <ActivityTimeline
