@@ -5,9 +5,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   cn,
   messageTypeColor,
-  messageColorClasses,
   shortInstanceId,
 } from "@/lib/utils";
+import type { MessageTypeColor } from "@/types/dashboard";
 import type { FeedMessage, InstanceState } from "@/types/dashboard";
 import {
   Tooltip,
@@ -45,9 +45,18 @@ export function ActivityTimeline({
     return () => clearInterval(id);
   }, []);
 
+  /** Hex colors for activity dots — keyed by MessageTypeColor token. */
+  const dotColors: Record<MessageTypeColor, string> = {
+    amber: "#f59e0b",
+    green: "#34d399",
+    blue: "#60a5fa",
+    purple: "#c084fc",
+    zinc: "#94a3b8",
+  };
+
   const grid = useMemo(() => {
     const nowMs = nowMsRef.current;
-    type BucketEntry = { color: string; label: string; content: string };
+    type BucketEntry = { hex: string; label: string; content: string };
     const map = new Map<string, BucketEntry[][]>();
 
     for (const inst of instances.values()) {
@@ -72,10 +81,9 @@ export function ActivityTimeline({
 
       const bucket = map.get(targetId);
       if (bucket) {
-        const color = messageTypeColor(entry.message.type, entry.isBroadcast);
-        const classes = messageColorClasses(color);
+        const colorToken = messageTypeColor(entry.message.type, entry.isBroadcast);
         bucket[clampedIndex].push({
-          color: classes.text,
+          hex: dotColors[colorToken],
           label: entry.isBroadcast ? "broadcast" : entry.message.type,
           content: entry.message.content.slice(0, 80),
         });
@@ -171,19 +179,17 @@ export function ActivityTimeline({
                             <div
                               className="relative flex h-7 items-center justify-center gap-0.5 cursor-default"
                               style={{
-                                background: "rgba(0,212,255,0.10)",
-                                border: "1px solid rgba(0,212,255,0.25)",
+                                background: `${dots[0].hex}12`,
+                                border: `1px solid ${dots[0].hex}40`,
                               }}
                             >
                               {dots.slice(0, 3).map((dot, dotIdx) => (
                                 <span
                                   key={dotIdx}
-                                  className={cn(
-                                    "inline-block h-2 w-2 rounded-full",
-                                    dot.color.replace("text-", "bg-"),
-                                  )}
+                                  className="inline-block h-2 w-2 rounded-full"
                                   style={{
-                                    boxShadow: "0 0 4px currentColor",
+                                    background: dot.hex,
+                                    boxShadow: `0 0 4px ${dot.hex}`,
                                   }}
                                   aria-label={`${dot.label}: ${dot.content}`}
                                 />
@@ -209,7 +215,7 @@ export function ActivityTimeline({
                           >
                             {dots.map((dot, dotIdx) => (
                               <div key={dotIdx} className={dotIdx > 0 ? "mt-1 border-t border-[#1a3356] pt-1" : ""}>
-                                <p className="font-bold uppercase tracking-wider" style={{ color: "#00d4ff" }}>
+                                <p className="font-bold uppercase tracking-wider" style={{ color: dot.hex }}>
                                   {dot.label}
                                 </p>
                                 <p style={{ color: "#6b8aaa" }}>{dot.content}</p>
