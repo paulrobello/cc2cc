@@ -9,6 +9,7 @@ Common failure modes, diagnostic steps, and solutions for cc2cc.
 - [Dashboard Shows No Instances](#dashboard-shows-no-instances)
 - [Dashboard Won't Load or Shows Blank](#dashboard-wont-load-or-shows-blank)
 - [Messages Not Delivered](#messages-not-delivered)
+- [Rate Limiting](#rate-limiting)
 - [Topics Issues](#topics-issues)
 - [Docker Deployment Issues](#docker-deployment-issues)
 - [Skill and Plugin Installation Issues](#skill-and-plugin-installation-issues)
@@ -87,15 +88,17 @@ lsof -i :3100
 
 ### Symptom: Instance ID format error on connection
 
-**Cause:** `CC2CC_USERNAME`, `CC2CC_HOST`, or `CC2CC_PROJECT` contains characters not allowed in instance IDs (spaces, special characters beyond `.`, `-`, `_`).
+**Cause:** `CC2CC_USERNAME`, `CC2CC_HOST`, or `CC2CC_PROJECT` contains characters not allowed in instance IDs (spaces or special characters beyond `.`, `-`, `_`).
 
-**Fix:** Set these variables to alphanumeric strings with only `.`, `-`, or `_`:
+**Fix:** The instance ID regex is `^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]{1,64}/[a-zA-Z0-9-]{1,64}$`. Set these variables to alphanumeric strings with only `.`, `-`, or `_`:
 
 ```bash
 CC2CC_USERNAME=alice
 CC2CC_HOST=workstation
 CC2CC_PROJECT=my-project
 ```
+
+The project segment has a maximum of 64 characters. The session segment (UUID, auto-generated) allows alphanumeric characters and hyphens, also up to 64 characters.
 
 ---
 
@@ -119,6 +122,14 @@ Note the variable names include `CC2CC_` — a common mistake is using the old n
 **Cause B:** Dashboard WebSocket connection is failing silently.
 
 **Fix:** Open the browser developer tools (F12) → Console tab. Look for WebSocket connection errors. The dashboard logs connection attempts and errors to the browser console.
+
+**Cause C:** CORS blocking the dashboard's requests to the hub.
+
+**Fix:** The hub uses `CC2CC_DASHBOARD_ORIGIN` to set the allowed CORS origin (defaults to `http://localhost:8029`). If the dashboard is served from a different origin (e.g. a LAN IP), set this variable on the hub:
+
+```bash
+CC2CC_DASHBOARD_ORIGIN=http://192.168.1.100:8029
+```
 
 ### Symptom: Dashboard shows instances but they all appear offline
 
@@ -150,10 +161,12 @@ Note the variable names include `CC2CC_` — a common mistake is using the old n
 
 **Cause A:** The recipient is offline and the message is waiting in Redis.
 
-**Diagnosis:** Check the recipient's queue depth via the dashboard (instance sidebar) or:
+**Diagnosis:** Check the recipient's queue depth via the dashboard (instance sidebar) or via the REST API. REST endpoints accept either `Authorization: Bearer <key>` or `?key=<key>`:
 
 ```bash
 curl "http://<hub>:3100/api/instances?key=<key>" | jq '.[] | {instanceId, queueDepth}'
+# or
+curl -H "Authorization: Bearer <key>" "http://<hub>:3100/api/instances" | jq '.[] | {instanceId, queueDepth}'
 ```
 
 **Fix:** The message will be delivered automatically when the recipient reconnects. If it has been queued for an unexpectedly long time, confirm the recipient plugin is actually running and connected.
@@ -170,15 +183,31 @@ redis-cli keys "processing:*"
 
 ### Symptom: `broadcast()` delivers to 0 instances even though peers are online
 
-**Cause:** The broadcast rate limit (1 per 5 seconds per instance) was exceeded.
+**Cause:** The broadcast rate limit (1 per 5 seconds per instance) was exceeded. See [Rate Limiting](#rate-limiting) for details.
 
-**Fix:** Wait 5 seconds between broadcast calls. The tool returns an error if the rate limit is exceeded — handle it in your workflow.
+**Fix:** Wait at least 5 seconds between broadcast calls. For frequent team-wide communication, use `publish_topic` on a shared topic instead.
 
 ### Symptom: Messages appear in `get_messages()` but not as `<channel>` notifications
 
 **Cause:** The plugin is not running or lost its connection to the hub between message arrival and delivery.
 
 **Fix:** Live delivery via `<channel>` tags requires an active plugin connection. Use `get_messages()` as a catch-up mechanism after reconnection. This is expected behavior for messages received while the plugin was disconnected.
+
+---
+
+## Rate Limiting
+
+### Symptom: WebSocket frames rejected with "Rate limit exceeded. Max 60 messages per 10 seconds."
+
+**Cause:** A plugin sent more than 60 WebSocket frames within a 10-second sliding window. This per-connection rate limit protects the hub from runaway or misbehaving clients.
+
+**Fix:** Reduce the message frequency. If you are calling tools in a tight loop, add a short delay between calls. The limit is 60 frames per 10-second window per connection, which is sufficient for normal collaboration workflows.
+
+### Symptom: `broadcast()` rejected with "Rate limit exceeded. Max one broadcast per 5 seconds."
+
+**Cause:** The broadcast rate limit (1 per 5 seconds per instance) was exceeded.
+
+**Fix:** Wait at least 5 seconds between broadcast calls from the same instance. The tool returns an error if the rate limit is exceeded. For frequent team-wide communication, use `publish_topic` on a shared topic instead.
 
 ---
 
@@ -234,12 +263,13 @@ CC2CC_REDIS_URL=redis://:yourpassword@localhost:6379
 
 **Cause:** `NEXT_PUBLIC_CC2CC_HUB_WS_URL` is set to `ws://localhost:3100` but the browser is on a different machine than the Docker host.
 
-**Fix:** Set `NEXT_PUBLIC_CC2CC_HUB_WS_URL` to the Docker host's LAN IP:
+**Fix:** Set `NEXT_PUBLIC_CC2CC_HUB_WS_URL` to the Docker host's LAN IP, and set `CC2CC_DASHBOARD_ORIGIN` on the hub so CORS allows the dashboard's origin:
 
 ```bash
 # In docker-compose.yml environment or .env
 NEXT_PUBLIC_CC2CC_HUB_WS_URL=ws://192.168.1.100:3100
 CC2CC_HOST_LAN_IP=192.168.1.100
+CC2CC_DASHBOARD_ORIGIN=http://192.168.1.100:8029
 ```
 
 ---
@@ -269,7 +299,8 @@ claude plugin add ./skill
 
 - `CC2CC_HUB_URL` — required, must be a `ws://` URL
 - `CC2CC_API_KEY` — required, must match `CC2CC_HUB_API_KEY` on the hub
-- `CC2CC_USERNAME`, `CC2CC_HOST`, `CC2CC_PROJECT` — optional, default to `$USER`, `$HOSTNAME`, `basename(cwd)`
+- `CC2CC_USERNAME`, `CC2CC_HOST`, `CC2CC_PROJECT` — optional, default to `$USER` / `$HOSTNAME` / `basename(cwd)`
+- `CC2CC_SESSION_ID` — optional; when set, the session file watcher is disabled and this value is used as the session segment of the instance ID
 
 ---
 
@@ -277,9 +308,11 @@ claude plugin add ./skill
 
 ### Symptom: All instances have the same session ID
 
-**Cause:** `CC2CC_SESSION_ID` is not set uniquely per instance. Without it, all instances in the same project directory poll the shared `.claude/.cc2cc-session-id` file and adopt the same session ID.
+**Cause:** `CC2CC_SESSION_ID` is not set uniquely per instance. Without it, all instances in the same project directory poll the shared `.claude/.cc2cc-session-id` file at startup and may adopt the same session ID.
 
-**Fix:** Ensure each instance has a unique `CC2CC_SESSION_ID` environment variable. When using `cctmux team`, this is handled automatically — each pane receives a distinct value. If launching manually, set a unique value per instance (e.g. `CC2CC_SESSION_ID=$(uuidgen)`).
+**Fix:** Set a unique `CC2CC_SESSION_ID` environment variable per instance. When using `cctmux team`, this is handled automatically — each pane receives a distinct value. If launching manually, set a unique value per instance (e.g. `CC2CC_SESSION_ID=$(uuidgen)`).
+
+When `CC2CC_SESSION_ID` is set, the plugin's session file watcher is **disabled** — it returns a no-op. This is by design: in team mode, multiple instances share the same project directory, so reacting to changes in the session file would cause all instances to converge on a single identity. The session ID is externally managed and stable for the lifetime of the plugin process.
 
 ### Symptom: Instances not seeing each other
 
@@ -296,6 +329,12 @@ claude plugin add ./skill
 **Cause:** The recipient `instanceId` is stale or incorrect. In team mode, multiple instances share the same `username@host:project` prefix, so partial addressing may fail with an ambiguity error.
 
 **Fix:** Always call `list_instances()` to get current full instance IDs before sending. Use the full `instanceId` (including the session segment) for direct messages. For team-wide communication, use `publish_topic` on the project topic instead.
+
+### Symptom: Unexpected "role nudge" ping message on connect
+
+**Cause:** When a plugin connects without a role set, the hub sends a system ping message prompting the agent to call `set_role`. This is normal behavior — agents that have been assigned a role in their system prompt should call `set_role` immediately after connecting.
+
+**Fix:** This message is informational and can be safely ignored if you do not use role-based routing. If you do use roles, ensure your agent calls `set_role()` early in the session to suppress future nudges on reconnect.
 
 ---
 

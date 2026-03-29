@@ -100,9 +100,10 @@ No build step — all other workspaces import directly from TypeScript source vi
 
 | Module | Contents |
 |--------|----------|
-| `src/types.ts` | `MessageType` enum, `Message` interface, `InstanceInfo` interface (with optional `role` field), `TopicInfo` interface |
-| `src/schema.ts` | Zod schemas for all message shapes and MCP tool inputs; uses `z.nativeEnum(MessageType)` for enum alignment |
-| `src/events.ts` | `HubEvent` discriminated union — all event types emitted to dashboard clients, including topic and role events |
+| `src/types.ts` | `MessageType` enum, `Message` interface, `InstanceInfo` interface (with optional `role` field), `TopicInfo` interface, `parseProject()` helper, `toHttpUrl()` helper |
+| `src/schema.ts` | Zod schemas for all message shapes and MCP tool inputs; uses `z.nativeEnum(MessageType)` for enum alignment; exports `INSTANCE_ID_RE` canonical regex |
+| `src/events.ts` | `HubEvent` discriminated union — 13 event types emitted to dashboard clients, including topic and role events |
+| `src/index.ts` | Barrel re-export of all types, schemas, and events |
 
 > **Note:** Zod version is pinned to `^3`. Do not upgrade to v4 — it is incompatible with the shared schemas.
 
@@ -114,18 +115,20 @@ No build step — all other workspaces import directly from TypeScript source vi
 
 | Module | Responsibility |
 |--------|---------------|
-| `index.ts` | Entry point; Bun + Hono server setup, WS upgrade routing for `/ws/plugin` and `/ws/dashboard`, CORS |
-| `config.ts` | Environment: `CC2CC_HUB_PORT` (3100), `CC2CC_HUB_API_KEY` (required), `CC2CC_REDIS_URL` |
+| `index.ts` | Entry point; Bun + Hono server setup, WS upgrade routing for `/ws/plugin` and `/ws/dashboard`, CORS, security headers, graceful shutdown, startup registry re-hydration from Redis |
+| `config.ts` | Environment: `CC2CC_HUB_PORT` (3100), `CC2CC_HUB_API_KEY` (required), `CC2CC_REDIS_URL`, `CC2CC_DASHBOARD_ORIGIN`; deferred validation via `validateConfig()` |
 | `auth.ts` | Timing-safe API key comparison via `keysEqual()` to prevent timing attacks |
-| `registry.ts` | In-memory `Map` of live connections + Redis presence TTLs (24 h); partial address resolution; role-based lookup via `getByRole()` |
+| `registry.ts` | In-memory `Map` of live connections + Redis presence TTLs (24 h); partial address resolution; role-based lookup via `getByRole()`; startup re-hydration via `hydrateOffline()` |
 | `queue.ts` | RPOPLPUSH-based at-least-once delivery; max 1000 msgs/queue; daily stats counter (`stats:messages:today`) with EXPIREAT midnight UTC; queue migration for session updates |
-| `broadcast.ts` | `BroadcastManager`: in-memory fan-out + per-instance 5 s rate limiter |
-| `topic-manager.ts` | Pub/sub topic lifecycle (create, delete, subscribe, unsubscribe, publish); persistent topic messages queued to offline subscribers; project topic auto-joined on connect |
-| `ws-handler.ts` | Plugin/dashboard WS lifecycle; message routing including role-based fan-out (`to: "role:<name>"`); emits `HubEvent` to `dashboardClients` set; handles 8 WS actions |
+| `broadcast.ts` | `BroadcastManager` class: in-memory fan-out + per-instance 5 s rate limiter |
+| `topic-manager.ts` | Pub/sub topic lifecycle (create, delete, subscribe, unsubscribe, publish); persistent topic messages queued to offline subscribers; project topic auto-joined on connect; subscription migration for session updates |
+| `ws-handler.ts` | Plugin/dashboard WS lifecycle; message routing including role-based fan-out (`to: "role:<name>"`); per-connection rate limiting (60 msg / 10 s); role nudge on connect; handles 8 WS action types |
+| `event-bus.ts` | Shared event infrastructure: `dashboardClients` set, `emitToDashboards()` helper, `broadcastManager` singleton; extracted to break circular dependency between `api.ts` and `ws-handler.ts` |
 | `api.ts` | REST handlers; `GET /health` is the only unauthenticated endpoint; all others require `Authorization: Bearer <key>` header (preferred) or `?key=` query param (fallback) |
-| `redis.ts` | Redis client setup (ioredis) and health check helper |
+| `redis.ts` | Redis client setup (ioredis) with exponential backoff reconnect and health check helper |
 | `utils.ts` | Standalone `parseProject()` helper for extracting the project segment from an instance ID |
-| `validation.ts` | Shared validation constants (e.g. `INSTANCE_ID_RE`) |
+| `constants.ts` | `WS_OPEN` constant (WebSocket readyState = 1) used across hub modules |
+| `validation.ts` | Re-exports `INSTANCE_ID_RE` from `@cc2cc/shared` (single source of truth) |
 
 ---
 
@@ -138,7 +141,7 @@ No build step — all other workspaces import directly from TypeScript source vi
 | `config.ts` | Assembles `instanceId` from env vars; polls for Claude session ID from `.claude/.cc2cc-session-id` (written by `SessionStart` hook), falling back to random UUIDv4 |
 | `connection.ts` | `HubConnection`: WS client using the `ws` package; exponential backoff (1 s → ×2 → 30 s max); `request()` method with 10 s timeout |
 | `channel.ts` | Converts hub `message:sent` events into `notifications/claude/channel` MCP notifications with `source: "cc2cc"` in meta |
-| `session-watcher.ts` | Watches `.claude/.cc2cc-session-id` via `fs.watchFile` for session changes (e.g. `/clear`); triggers `session_update` on the hub, replaces connection and tools with new identity |
+| `session-watcher.ts` | Watches `.claude/.cc2cc-session-id` via `fs.watchFile` (poll-based, 2 s interval) for session changes (e.g. `/clear`); triggers `session_update` on the hub, replaces connection and tools with new identity; **disabled** when `CC2CC_SESSION_ID` is set (team mode) |
 | `tools.ts` | Ten MCP tools — `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic` |
 
 **Instance ID format:**
@@ -195,13 +198,13 @@ The UUID is generated once per browser session (stored in `sessionStorage`) and 
 
 | Module | Responsibility |
 |--------|---------------|
-| `WsProvider` | Single context providing both WS connections; accumulates `instances` Map, `topics` Map, `feed[]` (capped at 500), counters; dispatches all `HubEvent` types |
-| `app/page.tsx` | Command Center: stats bar, instance sidebar, feed filter bar, live message feed, manual send bar |
-| `app/topics/page.tsx` | Topics management: topic list + create/delete, subscriber list + subscribe/unsubscribe, publish panel |
-| `app/analytics/page.tsx` | Stats bar + activity timeline |
-| `app/conversations/page.tsx` | Thread-grouped conversation view + message inspector |
-| `app/graph/page.tsx` | Network Graph: force-directed canvas visualization of instances, roles, and message traffic |
-| `lib/api.ts` | Typed fetch wrappers for hub REST; `AbortSignal.timeout(10_000)` on all calls; topic wrappers: `fetchTopics`, `createTopic`, `deleteTopic`, `subscribeToTopic`, `unsubscribeFromTopic` |
+| `src/components/ws-provider/` | Single context providing both WS connections; accumulates `instances` Map, `topics` Map, `feed[]` (capped at 500), counters; dispatches all `HubEvent` types |
+| `src/app/page.tsx` | Command Center: stats bar, instance sidebar, feed filter bar, live message feed, manual send bar |
+| `src/app/topics/page.tsx` | Topics management: topic list + create/delete, subscriber list + subscribe/unsubscribe, publish panel |
+| `src/app/analytics/page.tsx` | Stats bar + activity timeline |
+| `src/app/conversations/page.tsx` | Thread-grouped conversation view + message inspector |
+| `src/app/graph/page.tsx` | Network Graph: force-directed canvas visualization of instances, roles, and message traffic |
+| `src/lib/api.ts` | Typed fetch wrappers for hub REST; `AbortSignal.timeout(10_000)` on all calls; topic wrappers: `fetchTopics`, `createTopic`, `deleteTopic`, `subscribeToTopic`, `unsubscribeFromTopic` |
 
 ---
 
@@ -277,10 +280,12 @@ All frames are JSON objects with an `action` field. Every request frame carries 
 Inbound messages from the hub arrive as MCP `notifications/claude/channel` notifications:
 
 ```xml
-<channel source="cc2cc" from="alice@server:api/uuid" type="task" message_id="abc123" reply_to="">
+<channel source="cc2cc" from="alice@server:api/uuid" type="task" message_id="abc123" reply_to="" topic="">
   Message body here
 </channel>
 ```
+
+The `topic` attribute is present only when the message was delivered via a topic.
 
 ### Dashboard WebSocket Events
 
@@ -294,7 +299,7 @@ Dashboards connect to `/ws/dashboard?key=<KEY>` and receive a stream of `HubEven
 | `instance:session_updated` | `{ oldInstanceId, newInstanceId, migrated, timestamp }` | Plugin session ID changes (e.g. `/clear`) |
 | `instance:role_updated` | `{ instanceId, role, timestamp }` | Instance calls `set_role` |
 | `message:sent` | `{ message, timestamp }` | Direct message routed by the hub |
-| `broadcast:sent` | `{ from, content, timestamp }` | Broadcast sent to all online instances |
+| `broadcast:sent` | `{ from, content, type?, timestamp }` | Broadcast sent to all online instances |
 | `queue:stats` | `{ instanceId, depth, timestamp }` | Queue depth change for an instance |
 | `topic:created` | `{ name, createdBy, timestamp }` | New topic created |
 | `topic:deleted` | `{ name, timestamp }` | Topic deleted |
@@ -313,7 +318,8 @@ Endpoint groups:
 - **Health:** `GET /health` — no auth required
 - **Instances:** list, ping, and remove registered instances
 - **Stats:** message counts and queue depths
-- **Topics:** create, delete, subscribe, unsubscribe, and publish
+- **Queue:** flush an instance's queue (admin)
+- **Topics:** create, delete, subscribe, unsubscribe, list subscribers, and publish
 
 > **Note:** There are no REST endpoints for `send_message` or `broadcast`. All direct message delivery goes through the plugin WebSocket connection.
 
@@ -336,6 +342,13 @@ Each instance has two Redis keys:
 2. If B is online, hub also delivers the message live over WS (message remains in queue)
 3. On reconnect, hub flushes the queue: `RPOPLPUSH queue:B processing:B`, sends over WS, then `LREM processing:B message`
 4. On hub crash/restart, `replayProcessing` moves `processing:B` back to `queue:B`
+
+**Startup recovery:**
+
+On hub startup, two Redis scans run in parallel before any WS connections are accepted:
+
+1. **Registry re-hydration** — SCAN for `instance:*` keys and populate the in-memory map with offline entries so `GET /api/instances` is immediately accurate
+2. **Processing replay** — SCAN for `processing:*` keys and RPOPLPUSH each entry back to its `queue:*` key, restoring the at-least-once delivery guarantee after a hub crash
 
 **Limits:**
 
@@ -362,6 +375,9 @@ The hub ignores any `from` field in client frames and stamps it from the sender'
 **WebSocket auth is query-param only.**
 Both `/ws/plugin` and `/ws/dashboard` authenticate via `?key=<CC2CC_HUB_API_KEY>`. REST endpoints additionally accept `Authorization: Bearer <key>` header (preferred), falling back to the `?key=` query param.
 
+**Plugin connections are rate-limited.**
+Each plugin WebSocket connection is limited to 60 messages per 10-second sliding window. Excess frames receive a 429 error response. The rate-limiter map is bounded to 10 000 entries with stale-entry eviction to prevent memory growth.
+
 **Queue delivery is at-least-once.**
 The RPOPLPUSH pattern ensures a message is never lost between "popped from queue" and "acked by recipient". Crash recovery replays the `processing:` key.
 
@@ -370,6 +386,9 @@ Messages sent to `to: 'broadcast'` fan out over live WS connections only — not
 
 **`role:<name>` is fan-out routing.**
 When `send_message` receives `to: "role:<name>"`, the hub fans out to every instance whose role matches, excluding the sender. Each recipient gets its own envelope with a unique `messageId`. Returns `{ role, recipients, delivered, queued }`.
+
+**Hub nudges role-less instances on connect.**
+When a plugin connects and has no role set in the registry, the hub sends a system `ping` message (from a synthetic `system@hub:cc2cc/<uuid>` identity) prompting the agent to call `set_role` if it has been assigned a role. This nudge ensures agents with system-prompt-assigned roles announce themselves immediately without waiting for a user message.
 
 **All message delivery is WebSocket-only.**
 There are no REST endpoints for `send_message` or `broadcast`. The hub's REST API is for metadata (instance list, stats, ping, remove), topic management, and topic publishing only.

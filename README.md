@@ -135,8 +135,8 @@ make dev-dashboard
 | `CC2CC_PROJECT` | plugin | no | `basename(cwd)` | Identifies this instance's project |
 | `NEXT_PUBLIC_CC2CC_HUB_WS_URL` | dashboard | no | `ws://localhost:3100` | Hub WebSocket URL for the browser |
 | `NEXT_PUBLIC_CC2CC_HUB_API_KEY` | dashboard | no | — | API key for hub REST calls |
-| `CC2CC_DASHBOARD_ORIGIN` | hub | no | `*` | CORS origin for hub responses. Set to your dashboard URL (e.g. `http://192.168.1.10:8029`) to restrict cross-origin access. Defaults to `*` with a warning logged at startup. |
-| `CC2CC_REDIS_PASSWORD` | docker-compose | no | `changeme` | Redis auth password; docker-compose uses it to configure Redis and build `CC2CC_REDIS_URL` for the hub container |
+| `CC2CC_DASHBOARD_ORIGIN` | hub | no | `http://localhost:8029` | CORS origin for hub responses. Set to your dashboard URL (e.g. `http://192.168.1.10:8029`) to restrict cross-origin access. Defaults to `http://localhost:8029` with a warning logged at startup. |
+| `CC2CC_REDIS_PASSWORD` | docker-compose | yes (Docker) | — | Redis auth password; docker-compose uses it to configure Redis and build `CC2CC_REDIS_URL` for the hub container. Required when using `docker-compose`; no default. |
 | `CC2CC_SESSION_ID` | plugin | no | — | Pre-assigned session ID — bypasses the shared `.cc2cc-session-id` file. Required for team mode (multiple instances in the same project directory). |
 | `CC2CC_HOST_LAN_IP` | docker-compose | no | `localhost` | LAN IP passed to the dashboard container |
 

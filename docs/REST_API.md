@@ -14,6 +14,7 @@ Complete reference for the cc2cc hub REST API. All endpoints are served by the h
   - [Messages](#messages)
   - [Ping](#ping)
   - [Topics](#topics)
+- [Security Headers](#security-headers)
 - [Error Responses](#error-responses)
 - [Related Documentation](#related-documentation)
 
@@ -75,7 +76,7 @@ Returns hub and Redis health status. **No authentication required.**
 | `status` | `string` | Always `"ok"` if the hub is running |
 | `connectedInstances` | `number` | Number of currently online plugin instances |
 | `redisOk` | `boolean` | Whether the Redis connection is healthy |
-| `uptime` | `number` | Hub uptime in seconds |
+| `uptime` | `number` | Hub uptime in seconds (floating-point, from `process.uptime()`) |
 
 ---
 
@@ -111,12 +112,11 @@ Returns all registered instances — both online and offline — with status inf
 
 #### `DELETE /api/instances/:id`
 
-Remove a stale offline instance from the registry. Flushes the instance's queue and emits an `instance:removed` HubEvent to dashboard clients.
+Remove a stale offline instance from the registry. Flushes the instance's queue and emits an `instance:removed` HubEvent to dashboard clients. Idempotent — returns success if the instance is already gone.
 
 **Path parameter:** `id` — URL-encoded instance ID
 
 **Errors:**
-- `404` — instance not found
 - `409` — cannot remove an online instance
 
 **Response:**
@@ -198,7 +198,7 @@ Check whether a specific instance is currently online.
 { "online": true, "instanceId": "alice@workstation:myproject/uuid" }
 ```
 
-Returns `{ "online": false }` for offline or unknown instances (no 404).
+Returns `{ "online": false, "instanceId": "..." }` for offline or unknown instances (no 404).
 
 ---
 
@@ -207,6 +207,12 @@ Returns `{ "online": false }` for offline or unknown instances (no 404).
 #### `GET /api/topics`
 
 List all topics with metadata and current subscriber counts.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `includeSubscribers` | `string` | — | Pass `"true"` to include a `subscribers` string array on each topic, avoiding separate per-topic subscriber requests |
 
 **Response:** `TopicInfo[]`
 
@@ -221,9 +227,17 @@ List all topics with metadata and current subscriber counts.
 ]
 ```
 
+When `?includeSubscribers=true` is set, each object also includes:
+
+```json
+{
+  "subscribers": ["alice@workstation:myproject/uuid", "bob@laptop:myproject/uuid"]
+}
+```
+
 #### `POST /api/topics`
 
-Create a topic. Idempotent — returns existing topic info if the topic already exists. Emits `topic:created` HubEvent only for new topics.
+Create a topic. Idempotent — returns existing topic info if the topic already exists. Emits `topic:created` HubEvent only for new topics. The `createdBy` field is server-stamped as `"dashboard"`.
 
 **Request body:**
 
@@ -328,7 +342,7 @@ Publish a message to all subscribers of a topic. The `from` field is server-stam
 | `metadata` | `object` | no | Arbitrary key/value pairs |
 
 **Errors:**
-- `400` — invalid topic name format
+- `400` — invalid topic name format, or invalid message `type` (must be one of `task`, `result`, `question`, `ack`, `ping`)
 - `404` — topic not found
 
 **Response:**
@@ -344,6 +358,22 @@ Publish a message to all subscribers of a topic. The `from` field is server-stam
 |-------|------|-------------|
 | `delivered` | `number` | Live WebSocket deliveries |
 | `queued` | `number` | Messages added to Redis queues (persistent path) |
+
+---
+
+## Security Headers
+
+All REST responses include the following security headers:
+
+| Header | Value |
+|--------|-------|
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `Referrer-Policy` | `no-referrer` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=()` |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` |
+
+CORS is controlled by the `CC2CC_DASHBOARD_ORIGIN` environment variable (defaults to `http://localhost:8029` if not set). Allowed methods: `GET`, `POST`, `DELETE`, `OPTIONS`. Allowed headers: `Content-Type`, `Authorization`.
 
 ---
 
