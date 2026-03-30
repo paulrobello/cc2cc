@@ -178,30 +178,28 @@ export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
     timestamp: new Date().toISOString(),
   });
 
-  // Nudge: if the instance has no role set, send a prompt so agents with a
-  // system-prompt-assigned role call set_role immediately after connecting
-  // (without waiting for a user message to trigger action).
+  // Wake-up nudge: always send a connected message so the agent becomes active.
+  // If the instance has no role, prompt it to set one; otherwise just confirm.
   // Delayed 5s to allow the plugin MCP transport and Claude Code to finish
   // initializing — channel notifications sent before that are dropped.
-  const entry = registry.get(instanceId);
-  if (!entry?.role) {
-    setTimeout(() => {
-      // Re-check: instance may have set a role or disconnected during the delay
-      const current = registry.get(instanceId);
-      if (!current || current.role || current.status !== "online") return;
+  setTimeout(() => {
+    const current = registry.get(instanceId);
+    if (!current || current.status !== "online") return;
 
-      const nudge: Message = {
-        messageId: randomUUID(),
-        from: `system@hub:cc2cc/${randomUUID()}`,
-        to: instanceId,
-        type: MessageType.ping,
-        content:
-          "You are now connected to the cc2cc hub. If you have been assigned a role, please call the set_role tool now to announce it. Do not reply to this message.",
-        timestamp: new Date().toISOString(),
-      };
-      ws.send(JSON.stringify(nudge));
-    }, 5_000);
-  }
+    const content = current.role
+      ? `You are now connected to the cc2cc hub with role "${current.role}". Ready for messages.`
+      : "You are now connected to the cc2cc hub. If you have been assigned a role, please call the set_role tool now to announce it. Do not reply to this message.";
+
+    const nudge: Message = {
+      messageId: randomUUID(),
+      from: `system@hub:cc2cc/${randomUUID()}`,
+      to: instanceId,
+      type: MessageType.ping,
+      content,
+      timestamp: new Date().toISOString(),
+    };
+    ws.send(JSON.stringify(nudge));
+  }, 5_000);
 
   console.log(`[ws] plugin connected: ${instanceId}`);
 }
