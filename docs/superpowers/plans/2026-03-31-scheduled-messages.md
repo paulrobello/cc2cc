@@ -2706,7 +2706,85 @@ git commit -m "feat(dashboard): add 'Schedule this' toggle to manual send bar"
 
 ---
 
-## Task 11: Full Integration Check
+## Task 11: Reduce Offline Instance TTL to 1 Hour
+
+**Files:**
+- Modify: `hub/src/config.ts`
+- Modify: `hub/src/registry.ts`
+
+- [ ] **Step 1: Add OFFLINE_TTL_SECONDS constant to config.ts**
+
+In `hub/src/config.ts`, add after the `REDIS_TTL_SECONDS` constant:
+
+```typescript
+/**
+ * Redis TTL for offline instance presence keys (1 hour in seconds).
+ * Online instances retain the full 24h TTL; when an instance disconnects,
+ * the TTL is shortened so stale entries are cleaned up faster.
+ */
+export const OFFLINE_TTL_SECONDS = 3600;
+```
+
+- [ ] **Step 2: Shorten Redis TTL when instance goes offline**
+
+In `hub/src/registry.ts`, add import:
+
+```typescript
+import { OFFLINE_TTL_SECONDS } from "./config.js";
+```
+
+Modify the `markOffline` method to re-set the Redis TTL to 1 hour:
+
+```typescript
+  async markOffline(instanceId: string): Promise<void> {
+    const entry = _map.get(instanceId);
+    if (entry) {
+      entry.status = "offline";
+      // Shorten Redis TTL to 1h so stale offline entries are cleaned up faster
+      await redis.expire(`instance:${instanceId}`, OFFLINE_TTL_SECONDS);
+    }
+  },
+```
+
+Note: `markOffline` changes from synchronous to async. Update all callers:
+
+In `hub/src/ws-handler.ts`, `onPluginClose` already uses `await` context — just add `await`:
+```typescript
+await registry.markOffline(instanceId);
+```
+
+In `hub/src/ws-handler.ts`, `migrateRegistration` — same:
+```typescript
+await registry.markOffline(oldInstanceId);
+```
+
+- [ ] **Step 3: Restore full TTL when instance reconnects**
+
+The `register` method already sets `"EX", 86400` (24h) on the Redis key, so reconnecting instances automatically get the full TTL restored. No change needed.
+
+- [ ] **Step 4: Run hub tests**
+
+Run: `cd /Users/probello/Repos/cc2cc && bun test hub/tests/`
+Expected: All tests PASS (registry.markOffline is mocked in most tests; if any test asserts on the sync signature, update it to async)
+
+- [ ] **Step 5: Update CLAUDE.md**
+
+Add to the Key Design Invariants section:
+
+```
+**Offline instances expire from Redis after 1 hour.** Online instances retain a 24h TTL; when a plugin disconnects, the TTL is shortened to 1h (`OFFLINE_TTL_SECONDS`). Reconnecting restores the full 24h TTL. Manual removal via `DELETE /api/instances/:id` is immediate.
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add hub/src/config.ts hub/src/registry.ts hub/src/ws-handler.ts CLAUDE.md
+git commit -m "feat(hub): reduce offline instance Redis TTL from 24h to 1h"
+```
+
+---
+
+## Task 12: Full Integration Check
 
 **Files:** None (verification only)
 
@@ -2728,7 +2806,7 @@ git commit -m "fix: resolve lint/type/test issues from scheduled messages integr
 
 ---
 
-## Task 12: Update CLAUDE.md
+## Task 13: Update CLAUDE.md
 
 **Files:**
 - Modify: `CLAUDE.md`
