@@ -80,31 +80,42 @@ cc2cc/
 
 **`subscriptions:sync` is a hub push frame.** After connect (and after session migration), the hub sends `{ action: "subscriptions:sync", topics: string[] }` with no `requestId`. The plugin intercepts this before the request/reply correlator; the dashboard WS handler returns early on it.
 
+**Scheduled messages use a fixed system sender.** `SYSTEM_SENDER_ID` (`system@hub:scheduler/00000000-0000-0000-0000-000000000000`) is stamped on all scheduler-fired messages. Recipients identify scheduled messages via this sender and `metadata.scheduleId`.
+
+**Minimum schedule interval is 1 minute.** Enforced at creation time by computing the gap between the next two cron fires. The scheduler polls Redis every 30 seconds.
+
+**Missed schedule fires are skipped.** On hub restart, schedules advance to the next future fire time — past fires are not retroactively sent.
+
+**Offline instances expire from Redis after 1 hour.** Online instances retain a 24h TTL; when a plugin disconnects, the TTL is shortened to 1h (`OFFLINE_TTL_SECONDS`). Reconnecting restores the full 24h TTL. Manual removal via `DELETE /api/instances/:id` is immediate.
+
+**Queue flush is deferred 5s on connect.** Channel notifications sent before Claude Code finishes initializing are silently dropped. The queue flush and wake-up nudge are both delayed 5 seconds after plugin connect to ensure the MCP transport is ready.
+
 ### packages/shared
 
 No build step — imported directly as TypeScript source by all other workspaces. Central source of truth for:
 - `MessageType` enum and `Message` / `InstanceInfo` / `TopicInfo` interfaces (`types.ts`)
 - Zod schemas for all message shapes and tool inputs (`schema.ts`) — uses `z.nativeEnum(MessageType)` for enum alignment
-- `HubEvent` discriminated union for dashboard WebSocket events (`events.ts`) — includes 6 topic/role events: `topic:created`, `topic:deleted`, `topic:subscribed`, `topic:unsubscribed`, `topic:message`, `instance:role_updated`
+- `HubEvent` discriminated union for dashboard WebSocket events (`events.ts`) — includes 6 topic/role events and 4 schedule events: `schedule:created`, `schedule:updated`, `schedule:deleted`, `schedule:fired`
 
 **Zod version is pinned to `^3`.** Do not upgrade to v4 — it is incompatible with the shared schemas.
 
 ### hub/
 
 - `config.ts` — env: `CC2CC_HUB_PORT` (3100), `CC2CC_HUB_API_KEY` (required), `CC2CC_REDIS_URL`
-- `registry.ts` — in-memory `Map` of live connections + Redis presence TTLs (24h); `role?: string` stored per entry; `setRole()` re-writes Redis with EX 86400
+- `registry.ts` — in-memory `Map` of live connections + Redis presence TTLs (24h online, 1h offline via `OFFLINE_TTL_SECONDS`); `role?: string` stored per entry; `setRole()` re-writes Redis with EX 86400
 - `queue.ts` — RPOPLPUSH-based at-least-once delivery; max 1000 msgs/queue; daily stats counter (`stats:messages:today`) with EXPIREAT midnight UTC
 - `broadcast.ts` — `BroadcastManager`: in-memory fan-out + per-instance 5s rate limiter
 - `topic-manager.ts` — all topic Redis operations; exports `topicManager` singleton and `parseProject(instanceId)` helper; Redis keys: `topic:{name}` (hash), `topic:{name}:subscribers` (Set), `instance:{id}:topics` (Set reverse index)
-- `ws-handler.ts` — plugin/dashboard WS lifecycle; message routing; emits `HubEvent` to `dashboardClients` set; handles WS frame actions: `send`, `broadcast`, `get_messages`, `ping`, `session_update`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `publish_topic`
-- `api.ts` — REST handlers; `GET /health` is the only unauthenticated endpoint; all others require `?key=`
+- `scheduler.ts` — `Scheduler` class: Redis ZSET polling (30s), cron-parser-based scheduling, CRUD operations, startup recovery; system sender: `SYSTEM_SENDER_ID`; supports simple interval syntax (`every 5m`) and standard 5-field cron
+- `ws-handler.ts` — plugin/dashboard WS lifecycle; message routing; emits `HubEvent` to `dashboardClients` set; handles WS frame actions: `send`, `broadcast`, `get_messages`, `ping`, `session_update`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `publish_topic`, `create_schedule`, `list_schedules`, `get_schedule`, `update_schedule`, `delete_schedule`
+- `api.ts` — REST handlers; `GET /health` is the only unauthenticated endpoint; all others require `?key=`; includes schedule CRUD at `/api/schedules`
 
 ### plugin/
 
 - `config.ts` — assembles `instanceId` from env vars; generates fresh UUIDv4 each start
 - `connection.ts` — `HubConnection`: WS client using `ws` package; exponential backoff (1s/×2/30s max); `request()` method with 10s timeout; intercepts `subscriptions:sync` push frames before the request/reply correlator
 - `channel.ts` — converts hub `message:sent` events to `notifications/claude/channel` MCP notifications; adds `topic` attribute when `message.topicName` is set
-- `tools.ts` — 10 MCP tools: `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic`
+- `tools.ts` — 15 MCP tools: `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic`, `create_schedule`, `list_schedules`, `get_schedule`, `update_schedule`, `delete_schedule`
 
 ### dashboard/
 
@@ -116,7 +127,8 @@ No build step — imported directly as TypeScript source by all other workspaces
 - `app/topics/page.tsx` — 3-panel Topics page: topic list + create/delete, subscriber list + subscribe/unsubscribe, publish panel
 - `app/analytics/page.tsx` — Stats bar + activity timeline
 - `app/conversations/page.tsx` — Thread-grouped view; topic messages are excluded from thread grouping
-- `lib/api.ts` — typed fetch wrappers; `hubUrl(path)` helper constructs all URLs; topic wrappers: `fetchTopics`, `createTopic`, `deleteTopic`, `subscribeToTopic`, `unsubscribeFromTopic`
+- `app/schedules/page.tsx` — 3-panel Schedules page: schedule list + create, detail/edit panel, fire history
+- `lib/api.ts` — typed fetch wrappers; `hubUrl(path)` helper constructs all URLs; topic wrappers: `fetchTopics`, `createTopic`, `deleteTopic`, `subscribeToTopic`, `unsubscribeFromTopic`; schedule wrappers: `fetchSchedules`, `createSchedule`, `updateSchedule`, `deleteSchedule`
 - Instance sidebar: sorted Topics → Online → Offline alphabetically within each group; role badge shown on online instances
 
 ### skill/
