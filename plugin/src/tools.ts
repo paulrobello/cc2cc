@@ -1,5 +1,5 @@
 // plugin/src/tools.ts
-import type { InstanceInfo, Message, MessageType, TopicInfo } from "@cc2cc/shared";
+import type { InstanceInfo, Message, MessageType, TopicInfo, Schedule } from "@cc2cc/shared";
 // Import shared input types to avoid duplication (ARC-011)
 import type { SendMessageInput, BroadcastInput, GetMessagesInput } from "@cc2cc/shared";
 import type { PluginConfig } from "./config.js";
@@ -244,6 +244,104 @@ export function createTools(config: Pick<PluginConfig, "hubUrl" | "apiKey">, con
         delivered: number;
         queued: number;
       }>("publish_topic", payload);
+      const { requestId: _, ...result } = response;
+      return result;
+    },
+
+    /**
+     * create_schedule — create a new scheduled message delivery.
+     * Uses conn.request("create_schedule", ...) so the hub stamps identity from WS connection.
+     */
+    async create_schedule(input: {
+      name: string;
+      expression: string;
+      target: string;
+      messageType: MessageType;
+      content: string;
+      persistent?: boolean;
+      metadata?: Record<string, unknown>;
+      maxFireCount?: number;
+      expiresAt?: string;
+    }): Promise<Schedule> {
+      const payload: Record<string, unknown> = {
+        name: input.name,
+        expression: input.expression,
+        target: input.target,
+        messageType: input.messageType,
+        content: input.content,
+        persistent: input.persistent ?? false,
+      };
+      if (input.metadata !== undefined) payload.metadata = input.metadata;
+      if (input.maxFireCount !== undefined) payload.maxFireCount = input.maxFireCount;
+      if (input.expiresAt !== undefined) payload.expiresAt = input.expiresAt;
+      const response = await conn.request<Schedule & { requestId: string }>(
+        "create_schedule",
+        payload,
+      );
+      const { requestId: _, ...result } = response;
+      return result as Schedule;
+    },
+
+    /**
+     * list_schedules — list all schedules visible to this instance.
+     * Uses conn.request("list_schedules", {}) for WS-based identity.
+     */
+    async list_schedules(_input: Record<string, never>): Promise<Schedule[]> {
+      const response = await conn.request<{ schedules: Schedule[]; requestId: string }>(
+        "list_schedules",
+        {},
+      );
+      return response.schedules;
+    },
+
+    /**
+     * get_schedule — retrieve a schedule by ID.
+     * Uses conn.request("get_schedule", { scheduleId }) for WS-based identity.
+     */
+    async get_schedule(input: { scheduleId: string }): Promise<Schedule> {
+      const response = await conn.request<Schedule & { requestId: string }>(
+        "get_schedule",
+        { scheduleId: input.scheduleId },
+      );
+      const { requestId: _, ...result } = response;
+      return result as Schedule;
+    },
+
+    /**
+     * update_schedule — update fields on an existing schedule.
+     * Uses conn.request("update_schedule", ...) for WS-based identity.
+     */
+    async update_schedule(input: {
+      scheduleId: string;
+      name?: string;
+      expression?: string;
+      target?: string;
+      messageType?: MessageType;
+      content?: string;
+      persistent?: boolean;
+      metadata?: Record<string, unknown>;
+      maxFireCount?: number | null;
+      expiresAt?: string | null;
+      enabled?: boolean;
+    }): Promise<Schedule> {
+      const { scheduleId, ...updates } = input;
+      const response = await conn.request<Schedule & { requestId: string }>(
+        "update_schedule",
+        { scheduleId, ...updates },
+      );
+      const { requestId: _, ...result } = response;
+      return result as Schedule;
+    },
+
+    /**
+     * delete_schedule — delete a schedule by ID.
+     * Uses conn.request("delete_schedule", { scheduleId }) for WS-based identity.
+     */
+    async delete_schedule(input: { scheduleId: string }): Promise<{ deleted: true; scheduleId: string }> {
+      const response = await conn.request<{ requestId: string; deleted: true; scheduleId: string }>(
+        "delete_schedule",
+        { scheduleId: input.scheduleId },
+      );
       const { requestId: _, ...result } = response;
       return result;
     },

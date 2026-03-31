@@ -19,6 +19,8 @@ import {
   SubscribeTopicInputSchema,
   UnsubscribeTopicInputSchema,
   PublishTopicInputSchema,
+  CreateScheduleInputSchema,
+  UpdateScheduleInputSchema,
 } from "@cc2cc/shared";
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -290,6 +292,127 @@ Always check reply_to when receiving results to match them to outstanding tasks.
           },
         },
       },
+      {
+        name: "create_schedule",
+        description:
+          "Create a scheduled message delivery. The expression field supports cron syntax " +
+          "(e.g. '*/5 * * * *') and simple interval syntax (e.g. '30s', '5m', '2h'). " +
+          "The target can be an instanceId, 'broadcast', or 'topic:<name>'.",
+        inputSchema: {
+          type: "object",
+          required: ["name", "expression", "target", "messageType", "content"],
+          properties: {
+            name: { type: "string", description: "Human-readable schedule name" },
+            expression: {
+              type: "string",
+              description: "Cron expression (e.g. '0 9 * * 1') or interval (e.g. '5m', '1h')",
+            },
+            target: {
+              type: "string",
+              description: "Delivery target: instanceId, 'broadcast', or 'topic:<name>'",
+            },
+            messageType: {
+              type: "string",
+              enum: Object.values(MessageType),
+              description: "Message type for the scheduled delivery",
+            },
+            content: { type: "string", description: "Message content to deliver" },
+            persistent: {
+              type: "boolean",
+              description: "Queue for offline targets (default false)",
+              default: false,
+            },
+            metadata: {
+              type: "object",
+              description: "Optional metadata key-value pairs",
+              nullable: true,
+            },
+            maxFireCount: {
+              type: "number",
+              description: "Maximum number of times to fire before auto-disabling",
+              nullable: true,
+            },
+            expiresAt: {
+              type: "string",
+              description: "ISO 8601 datetime after which the schedule auto-disables",
+              nullable: true,
+            },
+          },
+        },
+      },
+      {
+        name: "list_schedules",
+        description: "List all active schedules.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          required: [],
+        },
+      },
+      {
+        name: "get_schedule",
+        description: "Retrieve a schedule by its ID.",
+        inputSchema: {
+          type: "object",
+          required: ["scheduleId"],
+          properties: {
+            scheduleId: { type: "string", description: "UUID of the schedule to retrieve" },
+          },
+        },
+      },
+      {
+        name: "update_schedule",
+        description: "Update fields on an existing schedule. Only provided fields are changed.",
+        inputSchema: {
+          type: "object",
+          required: ["scheduleId"],
+          properties: {
+            scheduleId: { type: "string", description: "UUID of the schedule to update" },
+            name: { type: "string", description: "New schedule name", nullable: true },
+            expression: {
+              type: "string",
+              description: "New cron or interval expression",
+              nullable: true,
+            },
+            target: { type: "string", description: "New delivery target", nullable: true },
+            messageType: {
+              type: "string",
+              enum: Object.values(MessageType),
+              description: "New message type",
+              nullable: true,
+            },
+            content: { type: "string", description: "New message content", nullable: true },
+            persistent: { type: "boolean", description: "Update persistence flag", nullable: true },
+            metadata: { type: "object", description: "New metadata", nullable: true },
+            maxFireCount: {
+              type: "number",
+              description: "New max fire count (null to clear)",
+              nullable: true,
+            },
+            expiresAt: {
+              type: "string",
+              description: "New expiry datetime (null to clear)",
+              nullable: true,
+            },
+            enabled: {
+              type: "boolean",
+              description: "Enable or disable the schedule",
+              nullable: true,
+            },
+          },
+        },
+      },
+      {
+        name: "delete_schedule",
+        description: "Permanently delete a schedule by its ID.",
+        inputSchema: {
+          type: "object",
+          required: ["scheduleId"],
+          properties: {
+            scheduleId: { type: "string", description: "UUID of the schedule to delete" },
+          },
+        },
+      },
     ],
   }));
 
@@ -379,6 +502,35 @@ Always check reply_to when receiving results to match them to outstanding tasks.
           return {
             content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
           };
+        }
+
+        case "create_schedule": {
+          const input = CreateScheduleInputSchema.parse(args);
+          const result = await tools.create_schedule(input);
+          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        }
+
+        case "list_schedules": {
+          const result = await tools.list_schedules({});
+          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        }
+
+        case "get_schedule": {
+          const input = z.object({ scheduleId: z.string() }).parse(args);
+          const result = await tools.get_schedule(input);
+          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        }
+
+        case "update_schedule": {
+          const input = z.object({ scheduleId: z.string() }).and(UpdateScheduleInputSchema).parse(args);
+          const result = await tools.update_schedule(input);
+          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        }
+
+        case "delete_schedule": {
+          const input = z.object({ scheduleId: z.string() }).parse(args);
+          const result = await tools.delete_schedule(input);
+          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
         }
 
         default:
