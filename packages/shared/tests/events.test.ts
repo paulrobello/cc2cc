@@ -98,3 +98,71 @@ describe("HubEventSchema", () => {
 		expect(result.success).toBe(false);
 	});
 });
+
+describe("Schedule HubEvents", () => {
+	it("parses schedule:created event", () => {
+		const result = HubEventSchema.safeParse({
+			event: "schedule:created",
+			schedule: {
+				scheduleId: "550e8400-e29b-41d4-a716-446655440000",
+				name: "Test",
+				expression: "*/5 * * * *",
+				target: "broadcast",
+				messageType: "task",
+				content: "Hello",
+				persistent: false,
+				createdBy: "paul@mac:cc2cc/abc",
+				createdAt: new Date().toISOString(),
+				nextFireAt: new Date().toISOString(),
+				fireCount: 0,
+				enabled: true,
+			},
+			timestamp: new Date().toISOString(),
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("parses schedule:updated event", () => {
+		const result = HubEventSchema.safeParse({
+			event: "schedule:updated",
+			schedule: {
+				scheduleId: "550e8400-e29b-41d4-a716-446655440000",
+				name: "Updated",
+				expression: "0 9 * * *",
+				target: "topic:team",
+				messageType: "ping",
+				content: "Wake up",
+				persistent: true,
+				createdBy: "paul@mac:cc2cc/abc",
+				createdAt: new Date().toISOString(),
+				nextFireAt: new Date().toISOString(),
+				fireCount: 3,
+				enabled: true,
+			},
+			timestamp: new Date().toISOString(),
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("parses schedule:deleted event", () => {
+		const result = HubEventSchema.safeParse({
+			event: "schedule:deleted",
+			scheduleId: "550e8400-e29b-41d4-a716-446655440000",
+			reason: "expired",
+			timestamp: new Date().toISOString(),
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("parses schedule:fired event", () => {
+		const result = HubEventSchema.safeParse({
+			event: "schedule:fired",
+			scheduleId: "550e8400-e29b-41d4-a716-446655440000",
+			scheduleName: "Daily nudge",
+			fireCount: 5,
+			nextFireAt: new Date().toISOString(),
+			timestamp: new Date().toISOString(),
+		});
+		expect(result.success).toBe(true);
+	});
+});

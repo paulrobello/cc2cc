@@ -1,6 +1,6 @@
 // packages/shared/src/events.ts
 import { z } from "zod";
-import { MessageSchema } from "./schema.js";
+import { MessageSchema, ScheduleSchema } from "./schema.js";
 import { MessageType } from "./types.js";
 
 const InstanceJoinedEventSchema = z.object({
@@ -96,6 +96,34 @@ const InstanceRoleUpdatedEventSchema = z.object({
 	timestamp: z.string().datetime(),
 });
 
+const ScheduleCreatedEventSchema = z.object({
+	event: z.literal("schedule:created"),
+	schedule: ScheduleSchema,
+	timestamp: z.string().datetime(),
+});
+
+const ScheduleUpdatedEventSchema = z.object({
+	event: z.literal("schedule:updated"),
+	schedule: ScheduleSchema,
+	timestamp: z.string().datetime(),
+});
+
+const ScheduleDeletedEventSchema = z.object({
+	event: z.literal("schedule:deleted"),
+	scheduleId: z.string().uuid(),
+	reason: z.string().optional(),
+	timestamp: z.string().datetime(),
+});
+
+const ScheduleFiredEventSchema = z.object({
+	event: z.literal("schedule:fired"),
+	scheduleId: z.string().uuid(),
+	scheduleName: z.string(),
+	fireCount: z.number().int().min(0),
+	nextFireAt: z.string().datetime(),
+	timestamp: z.string().datetime(),
+});
+
 /** Discriminated union of all events the hub emits to WebSocket clients */
 export const HubEventSchema = z.discriminatedUnion("event", [
 	InstanceJoinedEventSchema,
@@ -111,6 +139,10 @@ export const HubEventSchema = z.discriminatedUnion("event", [
 	TopicUnsubscribedEventSchema,
 	TopicMessageEventSchema,
 	InstanceRoleUpdatedEventSchema,
+	ScheduleCreatedEventSchema,
+	ScheduleUpdatedEventSchema,
+	ScheduleDeletedEventSchema,
+	ScheduleFiredEventSchema,
 ]);
 
 export type HubEvent = z.infer<typeof HubEventSchema>;
@@ -133,3 +165,7 @@ export type TopicMessageEvent = z.infer<typeof TopicMessageEventSchema>;
 export type InstanceRoleUpdatedEvent = z.infer<
 	typeof InstanceRoleUpdatedEventSchema
 >;
+export type ScheduleCreatedEvent = z.infer<typeof ScheduleCreatedEventSchema>;
+export type ScheduleUpdatedEvent = z.infer<typeof ScheduleUpdatedEventSchema>;
+export type ScheduleDeletedEvent = z.infer<typeof ScheduleDeletedEventSchema>;
+export type ScheduleFiredEvent = z.infer<typeof ScheduleFiredEventSchema>;
