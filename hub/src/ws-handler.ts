@@ -147,9 +147,6 @@ export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
   registry.setWsRef(instanceId, ws);
   broadcastManager.addPluginWs(instanceId, ws);
 
-  // Atomic queue flush: replay all pending messages before entering live mode
-  await flushPendingQueue(instanceId, ws);
-
   // Auto-join project topic (sanitized to meet topic name constraints)
   const topicName = sanitizeProjectTopic(project);
   const isNewTopic = !(await topicManager.topicExists(topicName));
@@ -179,14 +176,20 @@ export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
     timestamp: new Date().toISOString(),
   });
 
-  // Wake-up nudge: always send a connected message so the agent becomes active.
-  // If the instance has no role, prompt it to set one; otherwise just confirm.
   // Delayed 5s to allow the plugin MCP transport and Claude Code to finish
   // initializing — channel notifications sent before that are dropped.
-  setTimeout(() => {
+  // Both the queue flush and the wake-up nudge are deferred to this window.
+  // Without this delay, queued messages are drained from Redis but the MCP
+  // notifications are silently dropped because Claude Code isn't ready yet.
+  setTimeout(async () => {
     const current = registry.get(instanceId);
     if (!current || current.status !== "online") return;
 
+    // Flush queued messages now that Claude Code is ready to receive notifications
+    await flushPendingQueue(instanceId, ws);
+
+    // Wake-up nudge: send a connected message so the agent becomes active.
+    // If the instance has no role, prompt it to set one; otherwise just confirm.
     const content = current.role
       ? `You are now connected to the cc2cc hub with role "${current.role}". Ready for messages.`
       : "You are now connected to the cc2cc hub. If you have been assigned a role, please call the set_role tool now to announce it. Do not reply to this message.";
