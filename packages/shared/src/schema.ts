@@ -127,6 +127,53 @@ export const PublishTopicInputSchema = z.object({
 	metadata: MetadataSchema,
 });
 
+/** Zod schema for a full Schedule object. */
+export const ScheduleSchema = z.object({
+	scheduleId: z.string().uuid(),
+	name: z.string().min(1).max(100),
+	expression: z.string().min(1).max(128),
+	target: z.string().min(1).max(256),
+	messageType: MessageTypeSchema,
+	content: z.string().min(1).max(MAX_CONTENT_BYTES),
+	metadata: MetadataSchema,
+	persistent: z.boolean(),
+	createdBy: z.string().min(1).max(256),
+	createdAt: z.string().datetime(),
+	nextFireAt: z.string().datetime(),
+	lastFiredAt: z.string().datetime().optional(),
+	fireCount: z.number().int().min(0),
+	maxFireCount: z.number().int().min(1).optional(),
+	expiresAt: z.string().datetime().optional(),
+	enabled: z.boolean(),
+});
+
+/** Input schema for creating a new schedule. */
+export const CreateScheduleInputSchema = z.object({
+	name: z.string().min(1).max(100),
+	expression: z.string().min(1).max(128),
+	target: z.string().min(1).max(256),
+	messageType: MessageTypeSchema,
+	content: z.string().min(1).max(MAX_CONTENT_BYTES),
+	persistent: z.boolean().default(false),
+	metadata: MetadataSchema,
+	maxFireCount: z.number().int().min(1).optional(),
+	expiresAt: z.string().datetime().optional(),
+});
+
+/** Input schema for updating an existing schedule (all fields optional). */
+export const UpdateScheduleInputSchema = z.object({
+	name: z.string().min(1).max(100).optional(),
+	expression: z.string().min(1).max(128).optional(),
+	target: z.string().min(1).max(256).optional(),
+	messageType: MessageTypeSchema.optional(),
+	content: z.string().min(1).max(MAX_CONTENT_BYTES).optional(),
+	persistent: z.boolean().optional(),
+	metadata: MetadataSchema,
+	maxFireCount: z.number().int().min(1).nullable().optional(),
+	expiresAt: z.string().datetime().nullable().optional(),
+	enabled: z.boolean().optional(),
+});
+
 // Infer TypeScript types from schemas where needed
 export type MessageInput = z.infer<typeof MessageSchema>;
 export type SendMessageInput = z.infer<typeof SendMessageInputSchema>;
@@ -138,3 +185,6 @@ export type SetRoleInput = z.infer<typeof SetRoleInputSchema>;
 export type SubscribeTopicInput = z.infer<typeof SubscribeTopicInputSchema>;
 export type UnsubscribeTopicInput = z.infer<typeof UnsubscribeTopicInputSchema>;
 export type PublishTopicInput = z.infer<typeof PublishTopicInputSchema>;
+export type ScheduleData = z.infer<typeof ScheduleSchema>;
+export type CreateScheduleInput = z.infer<typeof CreateScheduleInputSchema>;
+export type UpdateScheduleInput = z.infer<typeof UpdateScheduleInputSchema>;
