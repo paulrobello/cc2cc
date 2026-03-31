@@ -13,12 +13,19 @@ import {
   onDashboardOpen,
   onDashboardClose,
   onDashboardMessage,
+  setScheduler,
 } from "./ws-handler.js";
 import type { WsData } from "./ws-handler.js";
 import type { ServerWebSocket } from "bun";
 import { redis } from "./redis.js";
-import { replayProcessing } from "./queue.js";
+import { replayProcessing, pushMessage } from "./queue.js";
 import { registry } from "./registry.js";
+import { Scheduler } from "./scheduler.js";
+import { randomUUID } from "node:crypto";
+import { MessageType, SYSTEM_SENDER_ID } from "@cc2cc/shared";
+import type { Message } from "@cc2cc/shared";
+import { topicManager } from "./topic-manager.js";
+import { broadcastManager, emitToDashboards } from "./event-bus.js";
 
 // Validate required configuration at startup (ARC-009).
 // Must be called after all imports so config.ts is fully evaluated.
@@ -55,8 +62,120 @@ app.use(
   }),
 );
 
+// ── Scheduler ────────────────────────────────────────────────────────────────
+
+import { WS_OPEN } from "./constants.js";
+
+const scheduler = new Scheduler({
+  redis,
+  routeMessage: async (target, type, content, metadata, persistent) => {
+    const now = new Date().toISOString();
+
+    if (target === "broadcast") {
+      broadcastManager.broadcast(SYSTEM_SENDER_ID, type, content, metadata);
+      emitToDashboards({
+        event: "broadcast:sent",
+        from: SYSTEM_SENDER_ID,
+        content,
+        type,
+        timestamp: now,
+      });
+      return;
+    }
+
+    if (target.startsWith("topic:")) {
+      const topicName = target.slice(6);
+      const message: Message = {
+        messageId: randomUUID(),
+        from: SYSTEM_SENDER_ID,
+        to: target,
+        type,
+        content,
+        topicName,
+        metadata,
+        timestamp: now,
+      };
+      const wsRefs = registry.getOnlineWsRefs();
+      const { delivered, queued } = await topicManager.publishToTopic(
+        topicName,
+        message,
+        persistent,
+        SYSTEM_SENDER_ID,
+        wsRefs,
+      );
+      emitToDashboards({
+        event: "topic:message",
+        name: topicName,
+        message,
+        persistent,
+        delivered,
+        queued,
+        timestamp: now,
+      });
+      return;
+    }
+
+    if (target.startsWith("role:")) {
+      const role = target.slice(5);
+      const targets = registry.getByRole(role);
+      for (const t of targets) {
+        const message: Message = {
+          messageId: randomUUID(),
+          from: SYSTEM_SENDER_ID,
+          to: t.instanceId,
+          type,
+          content,
+          metadata,
+          timestamp: now,
+        };
+        const depth = await pushMessage(t.instanceId, message);
+        registry.setQueueDepth(t.instanceId, depth);
+        const recipientWs = registry.getWsRef(t.instanceId) as ServerWebSocket<WsData> | undefined;
+        if (recipientWs && recipientWs.readyState === WS_OPEN) {
+          recipientWs.send(JSON.stringify(message));
+        }
+        emitToDashboards({ event: "message:sent", message, timestamp: now });
+        emitToDashboards({
+          event: "queue:stats",
+          instanceId: t.instanceId,
+          depth,
+          timestamp: now,
+        });
+      }
+      return;
+    }
+
+    // Direct instance delivery
+    const message: Message = {
+      messageId: randomUUID(),
+      from: SYSTEM_SENDER_ID,
+      to: target,
+      type,
+      content,
+      metadata,
+      timestamp: now,
+    };
+    const depth = await pushMessage(target, message);
+    registry.setQueueDepth(target, depth);
+    const recipientWs = registry.getWsRef(target) as ServerWebSocket<WsData> | undefined;
+    if (recipientWs && recipientWs.readyState === WS_OPEN) {
+      recipientWs.send(JSON.stringify(message));
+    }
+    emitToDashboards({ event: "message:sent", message, timestamp: now });
+    emitToDashboards({
+      event: "queue:stats",
+      instanceId: target,
+      depth,
+      timestamp: now,
+    });
+  },
+  emitToDashboards,
+});
+
+setScheduler(scheduler);
+
 // Mount REST routes
-buildApiRoutes(app);
+buildApiRoutes(app, scheduler);
 
 // Bun WebSocket server — handles upgrade for /ws/plugin and /ws/dashboard
 // `server` is kept in scope so that SIGTERM / SIGINT handlers can call server.stop().
@@ -131,6 +250,7 @@ console.log(`[hub] listening on port ${config.port}`);
 // Graceful shutdown — stop accepting new connections then let the process exit.
 async function shutdown(signal: string): Promise<void> {
   console.log(`[hub] ${signal} received — shutting down`);
+  scheduler.stop();
   await server.stop();
   await redis.quit();
   process.exit(0);
@@ -204,6 +324,13 @@ process.on("SIGINT", () => {
         `[hub] startup: replayed ${procTotal} total in-flight message(s) from processing keys`,
       );
     }
+
+    // ── 3. Recover schedules ─────────────────────────────────────────────────
+    const schedRecovered = await scheduler.recover();
+    if (schedRecovered > 0) {
+      console.log(`[hub] startup: recovered ${schedRecovered} schedule(s)`);
+    }
+    scheduler.start();
   } catch (err) {
     console.error(
       "[hub] startup: initialization scan failed",

@@ -8,8 +8,9 @@ import { emitToDashboards } from "./event-bus.js";
 import { topicManager, validateTopicName } from "./topic-manager.js";
 import { keysEqual } from "./auth.js";
 import { checkRedisHealth } from "./redis.js";
-import { MessageType } from "@cc2cc/shared";
+import { MessageType, CreateScheduleInputSchema, UpdateScheduleInputSchema } from "@cc2cc/shared";
 import type { Message } from "@cc2cc/shared";
+import type { Scheduler } from "./scheduler.js";
 
 /**
  * Validate the API key from a Hono request context.
@@ -43,7 +44,7 @@ function getKey(c: Context): string | undefined {
  * Mount all REST routes onto the given Hono app.
  * /health is publicly accessible; all other routes require ?key=<CC2CC_HUB_API_KEY>.
  */
-export function buildApiRoutes(app: Hono): void {
+export function buildApiRoutes(app: Hono, scheduler?: Scheduler): void {
   // GET /health — no auth required; returns service health status
   app.get("/health", async (c) => {
     const redisOk = await checkRedisHealth();
@@ -343,5 +344,84 @@ export function buildApiRoutes(app: Hono): void {
       timestamp: new Date().toISOString(),
     });
     return c.json({ delivered, queued });
+  });
+
+  // ── Schedule endpoints ──────────────────────────────────────────────────────
+
+  // POST /api/schedules — create a new schedule
+  app.post("/api/schedules", async (c) => {
+    const authErr = validateKey(getKey(c));
+    if (authErr) return authErr;
+    if (!scheduler) return c.json({ error: "Scheduler not available" }, 503);
+
+    const body = await c.req.json();
+    const parseResult = CreateScheduleInputSchema.safeParse(body);
+    if (!parseResult.success) {
+      return c.json({ error: "Invalid schedule payload", details: parseResult.error.flatten() }, 400);
+    }
+
+    try {
+      const schedule = await scheduler.createSchedule(parseResult.data, "dashboard");
+      return c.json(schedule, 201);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  // GET /api/schedules — list all schedules
+  app.get("/api/schedules", async (c) => {
+    const authErr = validateKey(getKey(c));
+    if (authErr) return authErr;
+    if (!scheduler) return c.json({ error: "Scheduler not available" }, 503);
+
+    const schedules = await scheduler.listSchedules();
+    return c.json(schedules);
+  });
+
+  // GET /api/schedules/:id — get a single schedule
+  app.get("/api/schedules/:id{.+}", async (c) => {
+    const authErr = validateKey(getKey(c));
+    if (authErr) return authErr;
+    if (!scheduler) return c.json({ error: "Scheduler not available" }, 503);
+
+    const id = decodeURIComponent(c.req.param("id"));
+    const schedule = await scheduler.getSchedule(id);
+    if (!schedule) return c.json({ error: "Schedule not found" }, 404);
+    return c.json(schedule);
+  });
+
+  // PATCH /api/schedules/:id — update a schedule
+  app.patch("/api/schedules/:id{.+}", async (c) => {
+    const authErr = validateKey(getKey(c));
+    if (authErr) return authErr;
+    if (!scheduler) return c.json({ error: "Scheduler not available" }, 503);
+
+    const id = decodeURIComponent(c.req.param("id"));
+    const body = await c.req.json();
+    const parseResult = UpdateScheduleInputSchema.safeParse(body);
+    if (!parseResult.success) {
+      return c.json({ error: "Invalid update payload", details: parseResult.error.flatten() }, 400);
+    }
+
+    try {
+      const schedule = await scheduler.updateSchedule(id, parseResult.data);
+      return c.json(schedule);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 404);
+    }
+  });
+
+  // DELETE /api/schedules/:id — delete a schedule
+  app.delete("/api/schedules/:id{.+}", async (c) => {
+    const authErr = validateKey(getKey(c));
+    if (authErr) return authErr;
+    if (!scheduler) return c.json({ error: "Scheduler not available" }, 503);
+
+    const id = decodeURIComponent(c.req.param("id"));
+    const existing = await scheduler.getSchedule(id);
+    if (!existing) return c.json({ error: "Schedule not found" }, 404);
+
+    await scheduler.deleteSchedule(id);
+    return c.json({ deleted: true, scheduleId: id });
   });
 }

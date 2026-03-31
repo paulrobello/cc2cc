@@ -10,7 +10,10 @@ import {
   SubscribeTopicInputSchema,
   UnsubscribeTopicInputSchema,
   PublishTopicInputSchema,
+  CreateScheduleInputSchema,
+  UpdateScheduleInputSchema,
 } from "@cc2cc/shared";
+import type { Scheduler } from "./scheduler.js";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { registry } from "./registry.js";
@@ -81,6 +84,14 @@ function checkRateLimit(instanceId: string): boolean {
   }
   entry.count++;
   return true;
+}
+
+// ── Scheduler reference ──────────────────────────────────────────────────────
+
+let _scheduler: Scheduler | null = null;
+
+export function setScheduler(scheduler: Scheduler): void {
+  _scheduler = scheduler;
 }
 
 // ── WS data attached per connection ──────────────────────────────────────────
@@ -325,6 +336,16 @@ export async function onPluginMessage(
     await handleUnsubscribeTopic(ws, instanceId, msg);
   } else if (action === "publish_topic") {
     await handlePublishTopic(ws, instanceId, msg);
+  } else if (action === "create_schedule") {
+    await handleCreateSchedule(ws, instanceId, msg);
+  } else if (action === "list_schedules") {
+    await handleListSchedules(ws, msg);
+  } else if (action === "get_schedule") {
+    await handleGetSchedule(ws, msg);
+  } else if (action === "update_schedule") {
+    await handleUpdateSchedule(ws, msg);
+  } else if (action === "delete_schedule") {
+    await handleDeleteSchedule(ws, msg);
   } else {
     ws.send(wsError(`Unknown action: ${action}`));
   }
@@ -840,6 +861,116 @@ async function handlePublishTopic(
     queued,
     timestamp: new Date().toISOString(),
   });
+}
+
+// ── Schedule frame handlers ──────────────────────────────────────────────────
+
+async function handleCreateSchedule(
+  ws: ServerWebSocket<WsData>,
+  instanceId: string,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  const requestId = msg.requestId as string | undefined;
+  if (!_scheduler) {
+    ws.send(wsError("Scheduler not available", requestId));
+    return;
+  }
+  const parseResult = CreateScheduleInputSchema.safeParse(msg);
+  if (!parseResult.success) {
+    ws.send(wsError("Invalid create_schedule payload", requestId, parseResult.error.flatten()));
+    return;
+  }
+  try {
+    const schedule = await _scheduler.createSchedule(parseResult.data, instanceId);
+    ws.send(JSON.stringify({ requestId, ...schedule }));
+  } catch (err) {
+    ws.send(wsError(err instanceof Error ? err.message : String(err), requestId));
+  }
+}
+
+async function handleListSchedules(
+  ws: ServerWebSocket<WsData>,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  const requestId = msg.requestId as string | undefined;
+  if (!_scheduler) {
+    ws.send(wsError("Scheduler not available", requestId));
+    return;
+  }
+  const schedules = await _scheduler.listSchedules();
+  ws.send(JSON.stringify({ requestId, schedules }));
+}
+
+async function handleGetSchedule(
+  ws: ServerWebSocket<WsData>,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  const requestId = msg.requestId as string | undefined;
+  if (!_scheduler) {
+    ws.send(wsError("Scheduler not available", requestId));
+    return;
+  }
+  const scheduleId = msg.scheduleId as string | undefined;
+  if (!scheduleId) {
+    ws.send(wsError("Missing scheduleId", requestId));
+    return;
+  }
+  const schedule = await _scheduler.getSchedule(scheduleId);
+  if (!schedule) {
+    ws.send(wsError("Schedule not found", requestId));
+    return;
+  }
+  ws.send(JSON.stringify({ requestId, ...schedule }));
+}
+
+async function handleUpdateSchedule(
+  ws: ServerWebSocket<WsData>,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  const requestId = msg.requestId as string | undefined;
+  if (!_scheduler) {
+    ws.send(wsError("Scheduler not available", requestId));
+    return;
+  }
+  const scheduleId = msg.scheduleId as string | undefined;
+  if (!scheduleId) {
+    ws.send(wsError("Missing scheduleId", requestId));
+    return;
+  }
+  const parseResult = UpdateScheduleInputSchema.safeParse(msg);
+  if (!parseResult.success) {
+    ws.send(wsError("Invalid update_schedule payload", requestId, parseResult.error.flatten()));
+    return;
+  }
+  try {
+    const schedule = await _scheduler.updateSchedule(scheduleId, parseResult.data);
+    ws.send(JSON.stringify({ requestId, ...schedule }));
+  } catch (err) {
+    ws.send(wsError(err instanceof Error ? err.message : String(err), requestId));
+  }
+}
+
+async function handleDeleteSchedule(
+  ws: ServerWebSocket<WsData>,
+  msg: Record<string, unknown>,
+): Promise<void> {
+  const requestId = msg.requestId as string | undefined;
+  if (!_scheduler) {
+    ws.send(wsError("Scheduler not available", requestId));
+    return;
+  }
+  const scheduleId = msg.scheduleId as string | undefined;
+  if (!scheduleId) {
+    ws.send(wsError("Missing scheduleId", requestId));
+    return;
+  }
+  const existing = await _scheduler.getSchedule(scheduleId);
+  if (!existing) {
+    ws.send(wsError("Schedule not found", requestId));
+    return;
+  }
+  await _scheduler.deleteSchedule(scheduleId);
+  ws.send(JSON.stringify({ requestId, deleted: true, scheduleId }));
 }
 
 // ── Dashboard connect / disconnect ───────────────────────────────────────────
