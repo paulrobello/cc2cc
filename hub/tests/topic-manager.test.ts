@@ -20,6 +20,7 @@ const redisMock = {
   sadd: mock(async () => 1),
   srem: mock(async () => 1),
   smembers: mock(async () => [] as string[]),
+  scard: mock(async () => 0),
   sunionstore: mock(async () => 0),
   keys: mock(async () => [] as string[]),
   incr: mock(async () => 1),
@@ -33,6 +34,13 @@ mock.module("../src/redis.js", () => ({
   redis: redisMock,
   checkRedisHealth: mock(async () => true),
 }));
+
+// Set env vars before ANY module is loaded — config.ts is evaluated at import time
+// and its `config` object is frozen with `as const`. Since bun runs all test files
+// in the same process, the first file to trigger config.ts determines the cached
+// apiKey for all subsequent files. Use the same key as integration.test.ts.
+process.env.CC2CC_HUB_API_KEY = "integration-test-key";
+process.env.CC2CC_TOPIC_EMPTY_TTL = "0";
 
 mock.module("../src/queue.js", () => ({
   pushMessage: pushMessageMock,

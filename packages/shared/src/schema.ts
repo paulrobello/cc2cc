@@ -101,6 +101,7 @@ export const TopicInfoSchema = z.object({
 	createdAt: z.string().datetime(),
 	createdBy: z.string().min(1).max(256),
 	subscriberCount: z.number().int().min(0),
+	autoExpire: z.boolean().optional(),
 });
 
 /** Input schema for the set_role MCP tool. */

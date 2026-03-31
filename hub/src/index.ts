@@ -251,6 +251,7 @@ console.log(`[hub] listening on port ${config.port}`);
 async function shutdown(signal: string): Promise<void> {
   console.log(`[hub] ${signal} received — shutting down`);
   scheduler.stop();
+  topicManager.cancelAllPendingDeletions();
   await server.stop();
   await redis.quit();
   process.exit(0);
@@ -325,7 +326,13 @@ process.on("SIGINT", () => {
       );
     }
 
-    // ── 3. Recover schedules ─────────────────────────────────────────────────
+    // ── 3. Recover empty topics ───────────────────────────────────────────────
+    const topicRecovered = await topicManager.recoverEmptyTopics();
+    if (topicRecovered > 0) {
+      console.log(`[hub] startup: scheduled deletion for ${topicRecovered} empty topic(s)`);
+    }
+
+    // ── 4. Recover schedules ─────────────────────────────────────────────────
     const schedRecovered = await scheduler.recover();
     if (schedRecovered > 0) {
       console.log(`[hub] startup: recovered ${schedRecovered} schedule(s)`);

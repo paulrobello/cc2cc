@@ -198,11 +198,11 @@ export function buildApiRoutes(app: Hono, scheduler?: Scheduler): void {
   app.post("/api/topics", async (c) => {
     const authErr = validateKey(getKey(c));
     if (authErr) return authErr;
-    const { name } = await c.req.json<{ name: string }>();
+    const { name, autoExpire } = await c.req.json<{ name: string; autoExpire?: boolean }>();
     const nameErr = validateTopicName(name);
     if (nameErr) return c.json({ error: nameErr }, 400);
     const isNew = !(await topicManager.topicExists(name));
-    const info = await topicManager.createTopic(name, "dashboard");
+    const info = await topicManager.createTopic(name, "dashboard", autoExpire ?? true);
     if (isNew) {
       emitToDashboards({
         event: "topic:created",

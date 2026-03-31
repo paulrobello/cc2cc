@@ -86,6 +86,7 @@ export interface TopicInfo {
 	createdAt: string; // ISO 8601
 	createdBy: string; // instanceId
 	subscriberCount: number;
+	autoExpire?: boolean; // true = auto-delete when empty after TTL; false = persist forever
 }
 
 /**

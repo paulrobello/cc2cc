@@ -56,3 +56,10 @@ export const REDIS_TTL_SECONDS = 86400;
  * the TTL is shortened so stale entries are cleaned up faster.
  */
 export const OFFLINE_TTL_SECONDS = 3600;
+
+/**
+ * TTL in seconds before an empty topic (0 subscribers) is auto-deleted.
+ * Set to 0 to disable auto-expiry globally. Default: 3600 (1 hour).
+ * Individual topics can opt out by setting autoExpire=false.
+ */
+export const TOPIC_EMPTY_TTL_SECONDS = parseInt(process.env.CC2CC_TOPIC_EMPTY_TTL ?? "3600", 10);

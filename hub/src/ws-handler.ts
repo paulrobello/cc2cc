@@ -161,7 +161,7 @@ export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
   // Auto-join project topic (sanitized to meet topic name constraints)
   const topicName = sanitizeProjectTopic(project);
   const isNewTopic = !(await topicManager.topicExists(topicName));
-  await topicManager.createTopic(topicName, instanceId);
+  await topicManager.createTopic(topicName, instanceId, false);
   if (isNewTopic) {
     emitToDashboards({
       event: "topic:created",
@@ -631,7 +631,7 @@ async function syncTopicsAfterSession(
   const project = parseProject(newInstanceId);
   const topicName = sanitizeProjectTopic(project);
   const isNewTopic = !(await topicManager.topicExists(topicName));
-  await topicManager.createTopic(topicName, newInstanceId);
+  await topicManager.createTopic(topicName, newInstanceId, false);
   if (isNewTopic) {
     emitToDashboards({
       event: "topic:created",
