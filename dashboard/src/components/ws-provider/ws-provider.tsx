@@ -13,11 +13,12 @@ import type {
   ConnectionState,
   FeedMessage,
   InstanceState,
+  ScheduleState,
   SessionStats,
   TopicState,
   WsContextValue,
 } from "@/types/dashboard";
-import { fetchInstances, fetchTopicsWithSubscribers } from "@/lib/api";
+import { fetchInstances, fetchSchedules, fetchTopicsWithSubscribers } from "@/lib/api";
 import { useReconnectingWs } from "@/hooks/use-reconnecting-ws";
 import { usePluginWs } from "@/hooks/use-plugin-ws";
 
@@ -60,6 +61,10 @@ export const WsContext = createContext<WsContextValue>({
   refreshTopics: async () => {
     throw new Error("WsProvider not mounted");
   },
+  schedules: new Map(),
+  refreshSchedules: async () => {
+    throw new Error("WsProvider not mounted");
+  },
 });
 
 /** Shape of the response from /api/hub/ws-config */
@@ -81,6 +86,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
     pendingTaskIds: new Set(),
   });
   const [topics, setTopics] = useState<Map<string, TopicState>>(new Map());
+  const [schedules, setSchedules] = useState<Map<string, ScheduleState>>(new Map());
 
   // Stable dashboard identity — lazy initializer runs once per mount
   const [dashboardInstanceId] = useState(() => initDashboardInstanceId());
@@ -129,6 +135,23 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
       const next = new Map(prev);
       for (const t of list) {
         next.set(t.name, { ...t });
+      }
+      return next;
+    });
+  }, []);
+
+  const seedSchedules = useCallback(async () => {
+    let list;
+    try {
+      list = await fetchSchedules();
+    } catch {
+      return;
+    }
+    if (!mountedRef.current) return;
+    setSchedules((prev) => {
+      const next = new Map(prev);
+      for (const s of list) {
+        next.set(s.scheduleId, { ...s, recentFires: next.get(s.scheduleId)?.recentFires ?? [] });
       }
       return next;
     });
@@ -341,6 +364,55 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             topicName: evt.name,
           });
           break;
+
+        case "schedule:created":
+          setSchedules((prev) => {
+            const next = new Map(prev);
+            next.set(evt.schedule.scheduleId, { ...evt.schedule, recentFires: [] });
+            return next;
+          });
+          break;
+
+        case "schedule:updated":
+          setSchedules((prev) => {
+            const next = new Map(prev);
+            const existing = next.get(evt.schedule.scheduleId);
+            next.set(evt.schedule.scheduleId, {
+              ...evt.schedule,
+              recentFires: existing?.recentFires ?? [],
+            });
+            return next;
+          });
+          break;
+
+        case "schedule:deleted":
+          setSchedules((prev) => {
+            const next = new Map(prev);
+            next.delete(evt.scheduleId);
+            return next;
+          });
+          break;
+
+        case "schedule:fired":
+          setSchedules((prev) => {
+            const next = new Map(prev);
+            const existing = next.get(evt.scheduleId);
+            if (existing) {
+              const recentFires = [
+                ...existing.recentFires,
+                { timestamp: evt.timestamp, fireCount: evt.fireCount },
+              ].slice(-50);
+              next.set(evt.scheduleId, {
+                ...existing,
+                fireCount: evt.fireCount,
+                nextFireAt: evt.nextFireAt,
+                lastFiredAt: evt.timestamp,
+                recentFires,
+              });
+            }
+            return next;
+          });
+          break;
       }
     },
     [appendFeed],
@@ -456,9 +528,10 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
 
       if (!mountedRef.current) return;
 
-      // seedInstances and seedTopics are async — setState fires after promise resolves, guarded by mountedRef.
+      // seedInstances, seedTopics, and seedSchedules are async — setState fires after promise resolves, guarded by mountedRef.
       seedInstances();
       seedTopics();
+      seedSchedules();
       connectDashboard();
       connectPlugin();
     };
@@ -477,6 +550,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
     destroyPlugin,
     seedInstances,
     seedTopics,
+    seedSchedules,
   ]);
 
   return (
@@ -492,6 +566,8 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
         sendBroadcast,
         sendPublishTopic,
         refreshTopics: seedTopics,
+        schedules,
+        refreshSchedules: seedSchedules,
       }}
     >
       {children}

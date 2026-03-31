@@ -4,7 +4,7 @@
 // The hub API key is injected server-side by the proxy — this module never
 // reads or transmits NEXT_PUBLIC_CC2CC_HUB_API_KEY.
 import { InstanceInfoSchema, TopicInfoSchema } from "@cc2cc/shared";
-import type { TopicInfo } from "@cc2cc/shared";
+import type { TopicInfo, Schedule } from "@cc2cc/shared";
 
 /** Topic with subscriber list — returned by GET /api/topics?includeSubscribers=true (ARC-008). */
 export type TopicWithSubscribers = TopicInfo & { subscribers: string[] };
@@ -205,5 +205,69 @@ export async function unsubscribeFromTopic(
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? "Failed to unsubscribe");
+  }
+}
+
+export async function fetchSchedules(): Promise<Schedule[]> {
+  try {
+    const res = await fetch(hubUrl("/api/schedules"), {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return [];
+    return res.json() as Promise<Schedule[]>;
+  } catch {
+    return [];
+  }
+}
+
+export async function createSchedule(input: {
+  name: string;
+  expression: string;
+  target: string;
+  messageType: string;
+  content: string;
+  persistent?: boolean;
+  metadata?: Record<string, unknown>;
+  maxFireCount?: number;
+  expiresAt?: string;
+}): Promise<Schedule> {
+  const res = await fetch(hubUrl("/api/schedules"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Create schedule failed: ${res.status}`);
+  }
+  return res.json() as Promise<Schedule>;
+}
+
+export async function updateSchedule(
+  scheduleId: string,
+  updates: Record<string, unknown>,
+): Promise<Schedule> {
+  const res = await fetch(hubUrl(`/api/schedules/${encodeURIComponent(scheduleId)}`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Update schedule failed: ${res.status}`);
+  }
+  return res.json() as Promise<Schedule>;
+}
+
+export async function deleteSchedule(scheduleId: string): Promise<void> {
+  const res = await fetch(hubUrl(`/api/schedules/${encodeURIComponent(scheduleId)}`), {
+    method: "DELETE",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Delete schedule failed: ${res.status}`);
   }
 }

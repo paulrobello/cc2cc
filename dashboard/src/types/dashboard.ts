@@ -1,11 +1,17 @@
 // dashboard/src/types/dashboard.ts
-import type { Message, InstanceInfo, MessageType, TopicInfo } from "@cc2cc/shared";
+import type { Message, InstanceInfo, MessageType, TopicInfo, Schedule } from "@cc2cc/shared";
 
 /** Connection state driven by the WsProvider reconnect logic */
 export type ConnectionState = "online" | "reconnecting" | "disconnected";
 
 export interface TopicState extends TopicInfo {
   subscribers: string[];
+}
+
+/** Live schedule state maintained by WsProvider */
+export interface ScheduleState extends Schedule {
+  /** Recent fire events observed this session (not persisted) */
+  recentFires: Array<{ timestamp: string; fireCount: number }>;
 }
 
 /**
@@ -66,6 +72,10 @@ export interface WsContextValue {
   ) => Promise<void>;
   /** Re-fetch all topics and subscriber lists from the hub REST API. */
   refreshTopics: () => Promise<void>;
+  /** All known schedules, keyed by scheduleId */
+  schedules: Map<string, ScheduleState>;
+  /** Re-fetch all schedules from the hub REST API. */
+  refreshSchedules: () => Promise<void>;
 }
 
 /** Shape returned by GET /api/stats */
