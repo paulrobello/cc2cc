@@ -357,7 +357,10 @@ export function buildApiRoutes(app: Hono, scheduler?: Scheduler): void {
     const body = await c.req.json();
     const parseResult = CreateScheduleInputSchema.safeParse(body);
     if (!parseResult.success) {
-      return c.json({ error: "Invalid schedule payload", details: parseResult.error.flatten() }, 400);
+      return c.json(
+        { error: "Invalid schedule payload", details: parseResult.error.flatten() },
+        400,
+      );
     }
 
     try {

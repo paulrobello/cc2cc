@@ -71,7 +71,7 @@ export function validateMinInterval(expression: string): boolean {
     const interval = parseExpression(expression, { currentDate: now, utc: true });
     const first = interval.next().getTime();
     const second = interval.next().getTime();
-    return (second - first) >= 60_000; // 1 minute minimum
+    return second - first >= 60_000; // 1 minute minimum
   } catch {
     return false;
   }
@@ -115,7 +115,9 @@ function scheduleFromHash(hash: Record<string, string>): Schedule | null {
     target: hash.target,
     messageType: hash.messageType as MessageType,
     content: hash.content,
-    metadata: hash.metadata ? JSON.parse(hash.metadata) : undefined,
+    metadata: hash.metadata
+      ? (JSON.parse(hash.metadata) as Record<string, string | number | boolean | null>)
+      : undefined,
     persistent: hash.persistent === "true",
     createdBy: hash.createdBy,
     createdAt: hash.createdAt,
@@ -130,18 +132,30 @@ function scheduleFromHash(hash: Record<string, string>): Schedule | null {
 
 function scheduleToHash(s: Schedule): string[] {
   const fields: string[] = [
-    "scheduleId", s.scheduleId,
-    "name", s.name,
-    "expression", s.expression,
-    "target", s.target,
-    "messageType", s.messageType,
-    "content", s.content,
-    "persistent", String(s.persistent),
-    "createdBy", s.createdBy,
-    "createdAt", s.createdAt,
-    "nextFireAt", s.nextFireAt,
-    "fireCount", String(s.fireCount),
-    "enabled", String(s.enabled),
+    "scheduleId",
+    s.scheduleId,
+    "name",
+    s.name,
+    "expression",
+    s.expression,
+    "target",
+    s.target,
+    "messageType",
+    s.messageType,
+    "content",
+    s.content,
+    "persistent",
+    String(s.persistent),
+    "createdBy",
+    s.createdBy,
+    "createdAt",
+    s.createdAt,
+    "nextFireAt",
+    s.nextFireAt,
+    "fireCount",
+    String(s.fireCount),
+    "enabled",
+    String(s.enabled),
   ];
   if (s.metadata) fields.push("metadata", JSON.stringify(s.metadata));
   if (s.lastFiredAt) fields.push("lastFiredAt", s.lastFiredAt);
@@ -250,8 +264,10 @@ export class Scheduler {
       const nowIso = new Date().toISOString();
 
       // Check if schedule should be deleted
-      const maxReached = schedule.maxFireCount !== undefined && newFireCount >= schedule.maxFireCount;
-      const expired = schedule.expiresAt !== undefined && now >= new Date(schedule.expiresAt).getTime();
+      const maxReached =
+        schedule.maxFireCount !== undefined && newFireCount >= schedule.maxFireCount;
+      const expired =
+        schedule.expiresAt !== undefined && now >= new Date(schedule.expiresAt).getTime();
 
       if (maxReached || expired) {
         // Delete the schedule
@@ -279,9 +295,12 @@ export class Scheduler {
 
         await this.redis.hset(
           SCHEDULE_KEY(id),
-          "fireCount", String(newFireCount),
-          "lastFiredAt", nowIso,
-          "nextFireAt", nextFire,
+          "fireCount",
+          String(newFireCount),
+          "lastFiredAt",
+          nowIso,
+          "nextFireAt",
+          nextFire,
         );
         await this.redis.zadd(SCHEDULES_PENDING, new Date(nextFire).getTime(), id);
       }
@@ -301,17 +320,20 @@ export class Scheduler {
 
   // ── CRUD operations ─────────────────────────────────────────────────────────
 
-  async createSchedule(input: {
-    name: string;
-    expression: string;
-    target: string;
-    messageType: MessageType;
-    content: string;
-    persistent?: boolean;
-    metadata?: Record<string, unknown>;
-    maxFireCount?: number;
-    expiresAt?: string;
-  }, createdBy: string): Promise<Schedule> {
+  async createSchedule(
+    input: {
+      name: string;
+      expression: string;
+      target: string;
+      messageType: MessageType;
+      content: string;
+      persistent?: boolean;
+      metadata?: Record<string, string | number | boolean | null>;
+      maxFireCount?: number;
+      expiresAt?: string;
+    },
+    createdBy: string,
+  ): Promise<Schedule> {
     const { cron, error } = normalizeExpression(input.expression);
     if (error || !cron) throw new Error(error ?? "Invalid expression");
 
@@ -374,14 +396,17 @@ export class Scheduler {
     if (updates.name !== undefined) existing.name = updates.name as string;
     if (updates.content !== undefined) existing.content = updates.content as string;
     if (updates.target !== undefined) existing.target = updates.target as string;
-    if (updates.messageType !== undefined) existing.messageType = updates.messageType as MessageType;
+    if (updates.messageType !== undefined)
+      existing.messageType = updates.messageType as MessageType;
     if (updates.persistent !== undefined) existing.persistent = updates.persistent as boolean;
-    if (updates.metadata !== undefined) existing.metadata = updates.metadata as Record<string, unknown>;
+    if (updates.metadata !== undefined)
+      existing.metadata = updates.metadata as Record<string, string | number | boolean | null>;
     if (updates.maxFireCount !== undefined) {
-      existing.maxFireCount = updates.maxFireCount === null ? undefined : updates.maxFireCount as number;
+      existing.maxFireCount =
+        updates.maxFireCount === null ? undefined : (updates.maxFireCount as number);
     }
     if (updates.expiresAt !== undefined) {
-      existing.expiresAt = updates.expiresAt === null ? undefined : updates.expiresAt as string;
+      existing.expiresAt = updates.expiresAt === null ? undefined : (updates.expiresAt as string);
     }
 
     // Handle expression change
@@ -398,7 +423,11 @@ export class Scheduler {
     if (updates.enabled !== undefined) {
       existing.enabled = updates.enabled as boolean;
       if (existing.enabled) {
-        await this.redis.zadd(SCHEDULES_PENDING, new Date(existing.nextFireAt).getTime(), scheduleId);
+        await this.redis.zadd(
+          SCHEDULES_PENDING,
+          new Date(existing.nextFireAt).getTime(),
+          scheduleId,
+        );
       } else {
         await this.redis.zrem(SCHEDULES_PENDING, scheduleId);
       }

@@ -1,6 +1,6 @@
 // hub/tests/scheduler.test.ts
 import { describe, it, expect, beforeEach, mock, afterEach } from "bun:test";
-import { MessageType, SYSTEM_SENDER_ID } from "@cc2cc/shared";
+import type { MessageType } from "@cc2cc/shared";
 
 // ── Redis mock ──────────────────────────────────────────────────────────────
 const scheduleStore = new Map<string, Record<string, string>>();

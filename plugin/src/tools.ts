@@ -299,10 +299,9 @@ export function createTools(config: Pick<PluginConfig, "hubUrl" | "apiKey">, con
      * Uses conn.request("get_schedule", { scheduleId }) for WS-based identity.
      */
     async get_schedule(input: { scheduleId: string }): Promise<Schedule> {
-      const response = await conn.request<Schedule & { requestId: string }>(
-        "get_schedule",
-        { scheduleId: input.scheduleId },
-      );
+      const response = await conn.request<Schedule & { requestId: string }>("get_schedule", {
+        scheduleId: input.scheduleId,
+      });
       const { requestId: _, ...result } = response;
       return result as Schedule;
     },
@@ -325,10 +324,10 @@ export function createTools(config: Pick<PluginConfig, "hubUrl" | "apiKey">, con
       enabled?: boolean;
     }): Promise<Schedule> {
       const { scheduleId, ...updates } = input;
-      const response = await conn.request<Schedule & { requestId: string }>(
-        "update_schedule",
-        { scheduleId, ...updates },
-      );
+      const response = await conn.request<Schedule & { requestId: string }>("update_schedule", {
+        scheduleId,
+        ...updates,
+      });
       const { requestId: _, ...result } = response;
       return result as Schedule;
     },
@@ -337,7 +336,9 @@ export function createTools(config: Pick<PluginConfig, "hubUrl" | "apiKey">, con
      * delete_schedule — delete a schedule by ID.
      * Uses conn.request("delete_schedule", { scheduleId }) for WS-based identity.
      */
-    async delete_schedule(input: { scheduleId: string }): Promise<{ deleted: true; scheduleId: string }> {
+    async delete_schedule(input: {
+      scheduleId: string;
+    }): Promise<{ deleted: true; scheduleId: string }> {
       const response = await conn.request<{ requestId: string; deleted: true; scheduleId: string }>(
         "delete_schedule",
         { scheduleId: input.scheduleId },

@@ -522,7 +522,10 @@ Always check reply_to when receiving results to match them to outstanding tasks.
         }
 
         case "update_schedule": {
-          const input = z.object({ scheduleId: z.string() }).and(UpdateScheduleInputSchema).parse(args);
+          const input = z
+            .object({ scheduleId: z.string() })
+            .and(UpdateScheduleInputSchema)
+            .parse(args);
           const result = await tools.update_schedule(input);
           return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
         }

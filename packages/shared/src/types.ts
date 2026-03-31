@@ -92,7 +92,8 @@ export interface TopicInfo {
  * Fixed system sender identity for hub-generated messages (scheduled, system nudges).
  * Deterministic UUID-nil so it's recognizable and never collides with real instances.
  */
-export const SYSTEM_SENDER_ID = "system@hub:scheduler/00000000-0000-0000-0000-000000000000";
+export const SYSTEM_SENDER_ID =
+	"system@hub:scheduler/00000000-0000-0000-0000-000000000000";
 
 /**
  * A scheduled recurring or one-shot message managed by the hub scheduler.
@@ -104,7 +105,7 @@ export interface Schedule {
 	target: InstanceId | "broadcast" | `topic:${string}` | `role:${string}`;
 	messageType: MessageType;
 	content: string;
-	metadata?: Record<string, unknown>;
+	metadata?: Record<string, string | number | boolean | null>;
 	persistent: boolean; // for topic targets: queue for offline subscribers?
 	createdBy: string; // instanceId of creator (audit trail only)
 	createdAt: string; // ISO 8601
