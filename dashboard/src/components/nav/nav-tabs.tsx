@@ -4,11 +4,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, BarChart2, MessageSquare, Radio, Network } from "lucide-react";
+import { LayoutDashboard, BarChart2, MessageSquare, Radio, Network, Clock } from "lucide-react";
 
 const TABS = [
   { href: "/", label: "Command", icon: LayoutDashboard },
   { href: "/topics", label: "Topics", icon: Radio },
+  { href: "/schedules", label: "Schedules", icon: Clock },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/conversations", label: "Signals", icon: MessageSquare },
   { href: "/graph", label: "Graph", icon: Network },
