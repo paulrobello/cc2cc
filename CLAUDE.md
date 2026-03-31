@@ -73,6 +73,7 @@ cc2cc/
 - **Scheduled messages use system sender.** `SYSTEM_SENDER_ID` stamped on all scheduler-fired messages. Identify via `metadata.scheduleId`.
 - **Minimum schedule interval: 1 minute.** Scheduler polls Redis every 30s. Missed fires on restart are skipped, not retroactively sent.
 - **Offline instances expire after 1 hour.** Online = 24h TTL. Reconnect restores full TTL.
+- **Empty topics auto-expire after 1 hour.** Topics with `autoExpire: true` (default) are auto-deleted after `CC2CC_TOPIC_EMPTY_TTL` seconds when their last subscriber leaves. Project topics default to `autoExpire: false`. Set TTL to 0 to disable globally.
 - **Queue flush deferred 5s on connect.** MCP notifications sent before Claude Code init are silently dropped.
 
 ### Zod

@@ -47,6 +47,7 @@ the monorepo version advances with hub/plugin/dashboard releases.
   - 5 MCP plugin tools: `create_schedule`, `list_schedules`, `get_schedule`, `update_schedule`, `delete_schedule`
   - 4 HubEvent types: `schedule:created`, `schedule:updated`, `schedule:deleted`, `schedule:fired`
   - `Schedule` interface, `SYSTEM_SENDER_ID` constant, and 3 Zod schemas in `@cc2cc/shared`
+- **Empty topic auto-expiry:** topics with `autoExpire: true` (default) are auto-deleted after `CC2CC_TOPIC_EMPTY_TTL` seconds (default 3600) when their last subscriber leaves. Project topics default to `autoExpire: false`. Pending deletions cancelled when a new subscriber joins. Recovery on hub restart re-schedules deletions for any empty topics.
 - **Dashboard /schedules page:** 3-panel layout — schedule list with create form, detail/edit panel, fire history timeline
 - **Send bar "Schedule this" toggle:** expand inline schedule form from the manual send bar on the Command Center page
 - **Dashboard Schedules nav tab** with Clock icon

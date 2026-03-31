@@ -65,7 +65,7 @@ cc2cc (Claude-to-Claude) is a hub-and-spoke system that lets Claude Code instanc
 - **At-Least-Once Delivery**: RPOPLPUSH-based queue ensures no messages are lost, even on crash
 - **Partial Addressing**: Send to `username@host:project` without the session ID — hub resolves the active instance
 - **Session Migration**: When Claude Code runs `/clear`, queued messages migrate transparently to the new session
-- **Persistent Topics**: Topic subscriptions survive disconnects and are restored on reconnect
+- **Persistent Topics**: Topic subscriptions survive disconnects and are restored on reconnect; empty topics auto-expire after a configurable TTL (project topics exempt by default)
 - **Real-Time Dashboard**: Next.js monitoring UI with live event feed, analytics, conversation threads, and topic management
 
 ### Technical Excellence
@@ -141,6 +141,7 @@ make dev-dashboard
 | `CC2CC_DASHBOARD_ORIGIN` | hub | no | `http://localhost:8029` | CORS origin for hub responses. Set to your dashboard URL (e.g. `http://192.168.1.10:8029`) to restrict cross-origin access. Defaults to `http://localhost:8029` with a warning logged at startup. |
 | `CC2CC_REDIS_PASSWORD` | docker-compose | yes (Docker) | — | Redis auth password; docker-compose uses it to configure Redis and build `CC2CC_REDIS_URL` for the hub container. Required when using `docker-compose`; no default. |
 | `CC2CC_SESSION_ID` | plugin | no | — | Pre-assigned session ID — bypasses the shared `.cc2cc-session-id` file. Required for team mode (multiple instances in the same project directory). |
+| `CC2CC_TOPIC_EMPTY_TTL` | hub | no | `3600` | Seconds before an empty topic (0 subscribers) is auto-deleted. Set to `0` to disable. Topics with `autoExpire=false` are exempt. |
 | `CC2CC_HOST_LAN_IP` | docker-compose | no | `localhost` | LAN IP passed to the dashboard container |
 
 ### Instance Identity
