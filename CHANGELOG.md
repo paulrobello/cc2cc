@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Table of Contents
 
 - [Version Note](#version-note)
+- [0.3.0 — hub/plugin/dashboard](#030--hubplugindashboard)
 - [0.2.5 — hub](#025--hub)
 - [0.2.4 — plugin/dashboard](#024--plugindashboard)
 - [0.2.3 — skill/plugin](#023--skillplugin)
@@ -27,12 +28,40 @@ The project maintains two version numbers that serve different purposes:
   after every change to the `skill/` directory because the plugin system caches by
   version number.
 
-- **`package.json` (root) version** (`0.1.0`) — the monorepo/release version. This
+- **`package.json` (root) version** (`0.3.0`) — the monorepo/release version. This
   tracks overall hub + plugin + dashboard releases intended for Docker deployment.
 
 The two versions are intentionally separate and will diverge over time. The skill
 version advances more frequently (each skill or pattern change requires a bump);
 the monorepo version advances with hub/plugin/dashboard releases.
+
+---
+
+## [0.3.0] — hub/plugin/dashboard
+
+### Added
+- **Scheduled messages:** hub-managed scheduler that fires messages to instances, topics, broadcasts, and roles on cron-like intervals. Supports standard 5-field cron expressions and simple interval syntax (`every 5m`, `every 1d at 09:00`). Minimum interval: 1 minute. Schedules persist in Redis, survive hub restarts, and auto-expire via `maxFireCount` or `expiresAt`.
+  - New `Scheduler` class in `hub/src/scheduler.ts` — Redis ZSET polling (30s), `cron-parser`-based fire time computation, startup recovery
+  - 5 REST endpoints: `POST/GET/GET/:id/PATCH/:id/DELETE/:id` at `/api/schedules`
+  - 5 WS frame actions: `create_schedule`, `list_schedules`, `get_schedule`, `update_schedule`, `delete_schedule`
+  - 5 MCP plugin tools: `create_schedule`, `list_schedules`, `get_schedule`, `update_schedule`, `delete_schedule`
+  - 4 HubEvent types: `schedule:created`, `schedule:updated`, `schedule:deleted`, `schedule:fired`
+  - `Schedule` interface, `SYSTEM_SENDER_ID` constant, and 3 Zod schemas in `@cc2cc/shared`
+- **Dashboard /schedules page:** 3-panel layout — schedule list with create form, detail/edit panel, fire history timeline
+- **Send bar "Schedule this" toggle:** expand inline schedule form from the manual send bar on the Command Center page
+- **Dashboard Schedules nav tab** with Clock icon
+
+### Fixed
+- **Queue flush timing:** deferred queue flush 5s on plugin connect to wait for Claude Code MCP transport initialization — previously queued messages were drained from Redis but silently dropped because channel notifications arrived before Claude Code was ready
+- **Command page sidebar scroll:** ScrollArea root now has `overflow-hidden` so the instance list scrolls within its flex container
+
+### Changed
+- **Offline instance TTL reduced from 24h to 1h:** `registry.markOffline()` now async, shortens Redis key TTL to `OFFLINE_TTL_SECONDS` (3600). Online instances retain 24h TTL. Reconnecting restores full TTL.
+- Plugin now exposes 15 MCP tools (was 10)
+- `@cc2cc/shared` HubEvent union expanded with 4 schedule event types
+
+### Dependencies
+- Added `cron-parser@4` to hub
 
 ---
 
@@ -242,7 +271,8 @@ the monorepo version advances with hub/plugin/dashboard releases.
 - `SessionStart` hook writes Claude session ID to `.claude/.cc2cc-session-id` for stable instance identity
 - Partial addressing: send to `username@host:project` without session segment
 
-[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/paulrobello/cc2cc/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/paulrobello/cc2cc/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/paulrobello/cc2cc/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/paulrobello/cc2cc/compare/skill-v0.2.2...v0.2.3

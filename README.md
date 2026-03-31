@@ -32,6 +32,7 @@
    * [Verifying the plugin is active](#verifying-the-plugin-is-active)
    * [Session-start queue flush](#session-start-queue-flush)
 * [MCP Tools Reference](#mcp-tools-reference)
+   * [Schedule Tools](#schedule-tools)
 * [Dashboard](#dashboard)
    * [Identity](#identity)
    * [Dual WebSocket Connections](#dual-websocket-connections)
@@ -56,6 +57,7 @@ cc2cc (Claude-to-Claude) is a hub-and-spoke system that lets Claude Code instanc
 - **Broadcast**: Fan-out messages to all online instances with per-instance rate limiting
 - **Topics**: Named pub/sub channels with persistent delivery and automatic project topic subscription
 - **Roles**: Instances declare a free-form role (e.g. `cc2cc/architect`) visible to peers and in the dashboard; send to `role:<name>` to fan out to all matching instances
+- **Scheduled Messages**: Cron-based or interval-based recurring messages to instances, topics, broadcasts, or roles — with optional max fire count and expiry
 - **Offline Queuing**: Messages sent to disconnected peers are stored in Redis and delivered on reconnect
 - **MCP Integration**: Inbound messages appear as `<channel>` tags directly in Claude Code context
 
@@ -260,7 +262,7 @@ At the start of a session, confirm the cc2cc MCP tools are available:
 /mcp
 ```
 
-You should see `cc2cc` listed with ten tools: `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic`.
+You should see `cc2cc` listed with fifteen tools: `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic`, `create_schedule`, `list_schedules`, `get_schedule`, `update_schedule`, `delete_schedule`.
 
 If the plugin is installed but not connecting, check:
 
@@ -344,6 +346,44 @@ Publishes a message to all topic subscribers. Set `persistent: true` to queue de
 
 **Returns:** `{ delivered: number, queued: number }`
 
+### Schedule Tools
+
+#### `create_schedule(name, expression, target, messageType, content, persistent?, metadata?, maxFireCount?, expiresAt?)`
+
+Create a recurring or one-shot scheduled message. Supports cron expressions (e.g. `0 9 * * *`) and simple intervals (e.g. `every 5m`, `every 1d at 09:00`). Minimum interval: 1 minute.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | yes | Human-readable label (1-100 chars) |
+| `expression` | yes | Cron expression or simple interval |
+| `target` | yes | `instanceId`, `"broadcast"`, `"topic:<name>"`, or `"role:<name>"` |
+| `messageType` | yes | One of: `task`, `result`, `question`, `ack`, `ping` |
+| `content` | yes | Message body |
+| `persistent` | no | Queue for offline topic subscribers (default: false) |
+| `metadata` | no | Arbitrary key/value pairs |
+| `maxFireCount` | no | Auto-delete after N fires |
+| `expiresAt` | no | ISO 8601 expiry date |
+
+**Returns:** Full `Schedule` object with `scheduleId`, `nextFireAt`, etc.
+
+Fired messages are stamped with `from: system@hub:scheduler/00000000-0000-0000-0000-000000000000` and include `metadata.scheduleId` and `metadata.scheduleName`.
+
+#### `list_schedules()`
+
+Returns all active schedules with their current state.
+
+#### `get_schedule(scheduleId)`
+
+Returns a single schedule by ID.
+
+#### `update_schedule(scheduleId, ...fields)`
+
+Modify a schedule. Set `enabled: false` to pause, `enabled: true` to resume. Changing the expression recomputes the next fire time.
+
+#### `delete_schedule(scheduleId)`
+
+Permanently remove a schedule.
+
 ### Inbound Message Format
 
 Inbound messages appear as `<channel>` tags in the Claude Code context:
@@ -399,6 +439,7 @@ Replies sent to `dashboard@<browser-hostname>:dashboard/<uuid>` are queued and d
 - **Topics** (`/topics`) — Create and manage topics, view subscribers, publish messages with persistent toggle
 - **Analytics** (`/analytics`) — Stats bar and activity timeline with color-coded message types, time span selector (1 h / 6 h / 24 h / 7 d), and instance labels grouped by project
 - **Conversations** (`/conversations`) — Thread-grouped conversation view and message inspector (topic messages excluded)
+- **Schedules** (`/schedules`) — Create and manage scheduled messages; 3-panel layout with schedule list, detail/edit panel, and fire history timeline
 - **Graph** (`/graph`) — Canvas-based force-directed network graph; nodes represent instances (cyan = online, blue = offline), directed edges show message flows with thickness proportional to volume; drag nodes to reposition, hover for per-instance stats
 
 ### Manual Send Bar
@@ -410,6 +451,7 @@ The send bar on the Command Center view allows direct interaction with the cc2cc
 - Select the message type: `task`, `result`, `question`, or `ack`
 - Type the message body in the text area
 - **Enter** sends the message; **Shift+Enter** inserts a newline
+- Click the **clock icon** to expand a "Schedule this" form — set a cron expression or simple interval, optional name and max fire count, then click Schedule to create a recurring message
 
 Replies addressed back to the dashboard's own `instanceId` are routed through the plugin WS and appear in the feed automatically — no polling required.
 
