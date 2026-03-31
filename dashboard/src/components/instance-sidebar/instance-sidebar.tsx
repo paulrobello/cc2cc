@@ -77,7 +77,7 @@ export function InstanceSidebar({
         </h2>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 overflow-hidden">
         <ul className="space-y-px p-2" role="list">
           {/* Topics section */}
           {topicList.length > 0 && (
