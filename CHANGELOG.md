@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Table of Contents
 
 - [Version Note](#version-note)
+- [0.2.5 — hub](#025--hub)
 - [0.2.4 — plugin/dashboard](#024--plugindashboard)
 - [0.2.3 — skill/plugin](#023--skillplugin)
 - [Unreleased](#unreleased)
@@ -21,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The project maintains two version numbers that serve different purposes:
 
-- **`skill/.claude-plugin/plugin.json` version** (`0.2.2`) — the Claude Code plugin
+- **`skill/.claude-plugin/plugin.json` version** (`0.2.4`) — the Claude Code plugin
   version. This is the version users install via `claude plugin add`. It must be bumped
   after every change to the `skill/` directory because the plugin system caches by
   version number.
@@ -32,6 +33,44 @@ The project maintains two version numbers that serve different purposes:
 The two versions are intentionally separate and will diverge over time. The skill
 version advances more frequently (each skill or pattern change requires a bump);
 the monorepo version advances with hub/plugin/dashboard releases.
+
+---
+
+## [0.2.5] — hub/dashboard
+
+### Added
+- **Role nudge on connect:** hub sends a `ping`-type nudge to newly connected
+  instances after a 5 s delay, prompting them to declare a role via `set_role`.
+  A second wake-up nudge is always sent on plugin connect regardless of role state.
+- **Activity grid enhancements:** dots colored by message type, color legend in
+  header, instance labels stacked above grid and grouped by project, configurable
+  time span selector (1 h / 6 h / 24 h / 7 d) with persistence via `sessionStorage`.
+- **Sender role badge in message feed:** feed entries now show the sender's role
+  badge inline.
+
+### Fixed
+- **Project topic auto-join crash:** plugins whose project name contained characters
+  outside the topic regex (e.g. `.claude`) crashed on connect because the raw project
+  name was passed directly to `createTopic`. Added `sanitizeProjectTopic()` in
+  `hub/src/utils.ts` — strips leading dots/non-alphanumeric chars, replaces invalid
+  chars with hyphens, and falls back to `"default"`. Applied in `onPluginOpen`,
+  `syncTopicsAfterSession`, and the `unsubscribe` project-topic guard.
+- **Topic cleanup on instance removal:** removing an offline instance now
+  unsubscribes it from all topics and cleans up related dashboard state.
+- **Dashboard hydration mismatch:** persisted time interval selector no longer
+  causes React hydration errors on page load.
+- **Activity timeline drift:** dots now use smooth continuous positioning instead
+  of snapping to discrete grid cells.
+- **Dashboard layout fixes:** message feed constrained to scroll within its
+  container; recent transmissions panel no longer collapses to zero height;
+  analytics message panel height restored; signals sidebar widened with role
+  badges visible.
+
+### Documentation
+- Synced all docs to implementation (`a6d1701`)
+
+### Tests
+- Added unit tests for `parseProject` and `sanitizeProjectTopic` (`hub/tests/utils.test.ts`)
 
 ---
 
@@ -203,7 +242,8 @@ the monorepo version advances with hub/plugin/dashboard releases.
 - `SessionStart` hook writes Claude session ID to `.claude/.cc2cc-session-id` for stable instance identity
 - Partial addressing: send to `username@host:project` without session segment
 
-[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/paulrobello/cc2cc/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/paulrobello/cc2cc/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/paulrobello/cc2cc/compare/skill-v0.2.2...v0.2.3
 [0.2.2]: https://github.com/paulrobello/cc2cc/releases/tag/skill-v0.2.2

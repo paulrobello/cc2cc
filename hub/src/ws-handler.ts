@@ -17,7 +17,7 @@ import { registry } from "./registry.js";
 import { INSTANCE_ID_RE } from "./validation.js";
 import { pushMessage, atomicFlushOne, ackProcessed, getQueueDepth, migrateQueue } from "./queue.js";
 import { topicManager } from "./topic-manager.js";
-import { parseProject } from "./utils.js";
+import { parseProject, sanitizeProjectTopic } from "./utils.js";
 import { keysEqual } from "./auth.js";
 import { WS_OPEN } from "./constants.js";
 import { dashboardClients, emitToDashboards, broadcastManager } from "./event-bus.js";
@@ -150,21 +150,22 @@ export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
   // Atomic queue flush: replay all pending messages before entering live mode
   await flushPendingQueue(instanceId, ws);
 
-  // Auto-join project topic (reuses `project` extracted above)
-  const isNewTopic = !(await topicManager.topicExists(project));
-  await topicManager.createTopic(project, instanceId);
+  // Auto-join project topic (sanitized to meet topic name constraints)
+  const topicName = sanitizeProjectTopic(project);
+  const isNewTopic = !(await topicManager.topicExists(topicName));
+  await topicManager.createTopic(topicName, instanceId);
   if (isNewTopic) {
     emitToDashboards({
       event: "topic:created",
-      name: project,
+      name: topicName,
       createdBy: instanceId,
       timestamp: new Date().toISOString(),
     });
   }
-  await topicManager.subscribe(project, instanceId);
+  await topicManager.subscribe(topicName, instanceId);
   emitToDashboards({
     event: "topic:subscribed",
-    name: project,
+    name: topicName,
     instanceId,
     timestamp: new Date().toISOString(),
   });
@@ -604,17 +605,18 @@ async function syncTopicsAfterSession(
   newInstanceId: string,
 ): Promise<void> {
   const project = parseProject(newInstanceId);
-  const isNewTopic = !(await topicManager.topicExists(project));
-  await topicManager.createTopic(project, newInstanceId);
+  const topicName = sanitizeProjectTopic(project);
+  const isNewTopic = !(await topicManager.topicExists(topicName));
+  await topicManager.createTopic(topicName, newInstanceId);
   if (isNewTopic) {
     emitToDashboards({
       event: "topic:created",
-      name: project,
+      name: topicName,
       createdBy: newInstanceId,
       timestamp: new Date().toISOString(),
     });
   }
-  await topicManager.subscribe(project, newInstanceId);
+  await topicManager.subscribe(topicName, newInstanceId);
   emitToDashboards({
     event: "topic:subscribed",
     name: project,

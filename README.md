@@ -329,7 +329,7 @@ Declares this instance's function on the team (e.g. `cc2cc/architect`). Call ear
 
 ### `subscribe_topic(topic)` / `unsubscribe_topic(topic)`
 
-Subscribe or unsubscribe from a named topic. Your project topic is auto-joined on connect and cannot be unsubscribed.
+Subscribe or unsubscribe from a named topic. Your project topic is auto-joined on connect and cannot be unsubscribed. The project name is sanitized to meet topic naming rules (lowercase alphanumeric, hyphens, underscores) — e.g. `.claude` becomes `claude`, `My.Project` becomes `my-project`.
 
 ### `list_topics()`
 
@@ -396,7 +396,7 @@ Replies sent to `dashboard@<browser-hostname>:dashboard/<uuid>` are queued and d
 
 - **Command Center** (`/`) — Instance sidebar (Topics / Online / Offline groups), live message feed with filter bar, manual send bar
 - **Topics** (`/topics`) — Create and manage topics, view subscribers, publish messages with persistent toggle
-- **Analytics** (`/analytics`) — Stats bar and activity timeline
+- **Analytics** (`/analytics`) — Stats bar and activity timeline with color-coded message types, time span selector (1 h / 6 h / 24 h / 7 d), and instance labels grouped by project
 - **Conversations** (`/conversations`) — Thread-grouped conversation view and message inspector (topic messages excluded)
 - **Graph** (`/graph`) — Canvas-based force-directed network graph; nodes represent instances (cyan = online, blue = offline), directed edges show message flows with thickness proportional to volume; drag nodes to reposition, hover for per-instance stats
 

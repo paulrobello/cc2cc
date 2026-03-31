@@ -2,7 +2,7 @@
 import type { Message, TopicInfo } from "@cc2cc/shared";
 import { redis } from "./redis.js";
 import { pushMessage } from "./queue.js";
-import { parseProject } from "./utils.js";
+import { parseProject, sanitizeProjectTopic } from "./utils.js";
 import { WS_OPEN } from "./constants.js";
 
 /**
@@ -116,7 +116,7 @@ export const topicManager = {
   async unsubscribe(name: string, instanceId: string, force = false): Promise<void> {
     const nameErr = validateTopicName(name);
     if (nameErr) throw new Error(nameErr);
-    if (!force && name === parseProject(instanceId)) {
+    if (!force && name === sanitizeProjectTopic(parseProject(instanceId))) {
       throw new Error("cannot unsubscribe from auto-joined project topic");
     }
     await redis.srem(`topic:${name}:subscribers`, instanceId);
