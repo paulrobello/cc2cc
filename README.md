@@ -39,6 +39,7 @@
 * [Security](#security)
 * [Architecture](#architecture)
 * [Team Mode](#team-mode)
+* [Official Agent Teams vs cc2cc](#official-agent-teams-vs-cc2cc)
 * [FAQ](#faq)
 * [Related Documentation](#related-documentation)
 
@@ -557,6 +558,34 @@ When `cctmux team` launches instances, it sets these env vars per pane:
 - `CC2CC_HUB_URL`, `CC2CC_API_KEY` — inherited from the parent shell
 
 No additional cc2cc configuration is needed beyond what a single-instance setup requires.
+
+## Official Agent Teams vs cc2cc
+
+Claude Code v2.1.32+ includes an experimental built-in **Agent Teams** feature (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). Both approaches enable multi-agent collaboration but differ significantly in architecture and capabilities.
+
+| Feature | Official Agent Teams | cc2cc |
+|---------|---------------------|-------|
+| **IPC mechanism** | File-based task list + built-in mailbox | Redis queues + WebSocket delivery |
+| **Infrastructure** | None (built into Claude Code) | Redis + Hub server |
+| **Setup** | Set one env var | Deploy hub + Redis, install plugin |
+| **Offline delivery** | No — teammates must be running | Yes — Redis queue with 24h TTL |
+| **Pub/sub topics** | No | Yes — named channels with persistent delivery |
+| **Cross-machine coordination** | No — single host only | Yes — any instance on the LAN |
+| **Message types** | `message` and `broadcast` | `task`, `result`, `question`, `ack`, `ping` + topics |
+| **Task management** | Built-in shared task list with dependency graphs and file locking | Via `TaskCreate` tool (no built-in shared list) |
+| **Role system** | Fixed lead + teammates | Dynamic `set_role()` with role-based routing |
+| **Monitoring** | Terminal split panes (tmux/iTerm2) | Real-time Next.js dashboard with analytics, graph, threads |
+| **Plan approval** | Built-in read-only plan mode | Manual (message the lead for approval) |
+| **Quality hooks** | `TeammateIdle`, `TaskCreated`, `TaskCompleted` | Standard Claude Code hooks only |
+| **Session resumption** | No (experimental limitation) | Messages persist in Redis across reconnects |
+| **Nested teams** | No | Yes — any instance can delegate to others |
+| **Identity** | Managed by Claude Code internally | Explicit `username@host:project/sessionId` addressing |
+
+### When to use which
+
+- **Official Agent Teams** — Quick parallel exploration with zero setup. Best when all agents run on one machine, no external infrastructure is available, and built-in task dependency management is valuable.
+- **cc2cc** — Full control over the messaging protocol with offline delivery guarantees, pub/sub topics, LAN-wide coordination, and a monitoring dashboard. Best for persistent teams, cross-machine setups, or when you need message durability.
+- **Both together** — Official Agent Teams for local task orchestration within a single lead's session; cc2cc for coordination between separate teams or machines.
 
 ## FAQ
 
