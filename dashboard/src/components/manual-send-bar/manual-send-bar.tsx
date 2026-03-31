@@ -2,7 +2,8 @@
 "use client";
 
 import { useState } from "react";
-import { Send } from "lucide-react";
+import { Send, Clock } from "lucide-react";
+import { createSchedule as apiCreateSchedule } from "@/lib/api";
 import {
   Select,
   SelectContent,
@@ -40,6 +41,10 @@ export function ManualSendBar({
   const [messageType, setMessageType] = useState<MessageType>(MessageType.task);
   const [content, setContent] = useState("");
   const [persistent, setPersistent] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [schedName, setSchedName] = useState("");
+  const [schedExpr, setSchedExpr] = useState("");
+  const [schedMaxFires, setSchedMaxFires] = useState("");
 
   async function handleSend() {
     const trimmed = content.trim();
@@ -53,6 +58,29 @@ export function ManualSendBar({
         await sendMessage(to, messageType, trimmed);
       }
       setContent("");
+    } catch (err) {
+      onError?.(err);
+    }
+  }
+
+  async function handleSchedule() {
+    const trimmed = content.trim();
+    if (!trimmed || !schedExpr.trim()) return;
+    try {
+      await apiCreateSchedule({
+        name: schedName.trim() || `${to} schedule`,
+        expression: schedExpr.trim(),
+        target: to,
+        messageType: messageType,
+        content: trimmed,
+        persistent,
+        ...(schedMaxFires ? { maxFireCount: parseInt(schedMaxFires, 10) } : {}),
+      });
+      setContent("");
+      setScheduling(false);
+      setSchedName("");
+      setSchedExpr("");
+      setSchedMaxFires("");
     } catch (err) {
       onError?.(err);
     }
@@ -210,8 +238,48 @@ export function ManualSendBar({
           >
             <Send className="h-3.5 w-3.5" />
           </button>
+          <button
+            type="button"
+            onClick={() => setScheduling(!scheduling)}
+            aria-label="Schedule message"
+            title="Schedule this message"
+            className="flex w-9 shrink-0 items-center justify-center transition-all duration-150"
+            style={{
+              background: scheduling ? "rgba(0,212,255,0.12)" : "#0d1f38",
+              border: `1px solid ${scheduling ? "#00d4ff" : "#1a3356"}`,
+              color: scheduling ? "#00d4ff" : "#2a5480",
+              height: "2.25rem",
+              cursor: "pointer",
+            }}
+          >
+            <Clock className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
+      {scheduling && (
+        <div className="mt-2 flex flex-wrap gap-2 items-center font-mono text-[10px]"
+          style={{ color: "#6b8aaa" }}>
+          <input value={schedExpr} onChange={(e) => setSchedExpr(e.target.value)}
+            placeholder="every 5m  or  0 9 * * *"
+            className="flex-1 min-w-[160px] bg-transparent outline-none placeholder:text-[#3a5470] px-2 py-1"
+            style={{ border: "1px solid #1a3356", color: "#e2e8f0" }} />
+          <input value={schedName} onChange={(e) => setSchedName(e.target.value)}
+            placeholder="Name (optional)"
+            className="w-32 bg-transparent outline-none placeholder:text-[#3a5470] px-2 py-1"
+            style={{ border: "1px solid #1a3356", color: "#e2e8f0" }} />
+          <input value={schedMaxFires} onChange={(e) => setSchedMaxFires(e.target.value)}
+            placeholder="Max fires"
+            type="number"
+            className="w-20 bg-transparent outline-none placeholder:text-[#3a5470] px-2 py-1"
+            style={{ border: "1px solid #1a3356", color: "#e2e8f0" }} />
+          <button type="button" onClick={() => void handleSchedule()}
+            disabled={!content.trim() || !schedExpr.trim()}
+            className="px-3 py-1 rounded uppercase tracking-wider disabled:opacity-40"
+            style={{ background: "rgba(0,212,255,0.1)", border: "1px solid rgba(0,212,255,0.3)", color: "#00d4ff" }}>
+            Schedule
+          </button>
+        </div>
+      )}
     </div>
   );
 }
