@@ -3,6 +3,9 @@ import type { InstanceInfo, InstanceStatus } from "@cc2cc/shared";
 import { redis } from "./redis.js";
 import { parseProject } from "./utils.js";
 
+/** Offline instance Redis TTL: 1 hour (matches OFFLINE_TTL_SECONDS in config.ts). */
+const OFFLINE_TTL_S = 3600;
+
 interface RegistryEntry extends InstanceInfo {
   // ws is intentionally kept out of InstanceInfo (shared type must not import Bun types)
   wsRef?: unknown; // set by ws-handler when plugin connects; used for live delivery check
@@ -49,12 +52,14 @@ export const registry = {
 
   /**
    * Mark an instance offline in the in-memory map.
-   * Redis key TTL continues — the queue remains accessible.
+   * Shortens the Redis key TTL to 1h so stale offline entries are cleaned up faster.
    */
-  markOffline(instanceId: string): void {
+  async markOffline(instanceId: string): Promise<void> {
     const entry = _map.get(instanceId);
     if (entry) {
       entry.status = "offline";
+      // Shorten Redis TTL to 1h so stale offline entries are cleaned up faster
+      await redis.expire(`instance:${instanceId}`, OFFLINE_TTL_S);
     }
   },
 

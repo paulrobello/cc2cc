@@ -49,3 +49,10 @@ export function validateConfig(): void {
  * Shared constant — import from config.ts instead of duplicating the literal.
  */
 export const REDIS_TTL_SECONDS = 86400;
+
+/**
+ * Redis TTL for offline instance presence keys (1 hour in seconds).
+ * Online instances retain the full 24h TTL; when an instance disconnects,
+ * the TTL is shortened so stale entries are cleaned up faster.
+ */
+export const OFFLINE_TTL_SECONDS = 3600;

@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, mock } from "bun:test";
 const redisMock = {
   set: mock(async () => "OK"),
   del: mock(async () => 1),
+  expire: mock(async () => 1),
   exists: mock(async () => 0),
   keys: mock(async () => [] as string[]),
   ping: mock(async () => "PONG"),
@@ -49,7 +50,7 @@ describe("registry", () => {
 
   it("marks an instance offline on deregister", async () => {
     await registry.register("alice@srv:api/abc", "api");
-    registry.markOffline("alice@srv:api/abc");
+    await registry.markOffline("alice@srv:api/abc");
     const info = registry.get("alice@srv:api/abc");
     expect(info?.status).toBe("offline");
   });
@@ -57,7 +58,7 @@ describe("registry", () => {
   it("returns all instances including offline ones", async () => {
     await registry.register("alice@srv:api/abc", "api");
     await registry.register("bob@mac:hub/xyz", "hub");
-    registry.markOffline("bob@mac:hub/xyz");
+    await registry.markOffline("bob@mac:hub/xyz");
     const all = registry.getAll();
     expect(all).toHaveLength(2);
     expect(all.find((i) => i.instanceId === "bob@mac:hub/xyz")?.status).toBe("offline");
@@ -66,7 +67,7 @@ describe("registry", () => {
   it("returns only online instances", async () => {
     await registry.register("alice@srv:api/abc", "api");
     await registry.register("bob@mac:hub/xyz", "hub");
-    registry.markOffline("bob@mac:hub/xyz");
+    await registry.markOffline("bob@mac:hub/xyz");
     const online = registry.getOnline();
     expect(online).toHaveLength(1);
     expect(online[0]?.instanceId).toBe("alice@srv:api/abc");
@@ -111,7 +112,7 @@ describe("registry.resolvePartial", () => {
 
   it("resolves to the single offline instance with warning", async () => {
     await registry.register("alice@srv:api/session1", "api");
-    registry.markOffline("alice@srv:api/session1");
+    await registry.markOffline("alice@srv:api/session1");
     const result = registry.resolvePartial("alice@srv:api");
     expect("instanceId" in result).toBe(true);
     if ("instanceId" in result) {
@@ -123,8 +124,8 @@ describe("registry.resolvePartial", () => {
   it("returns error when 2+ offline instances match", async () => {
     await registry.register("alice@srv:api/session1", "api");
     await registry.register("alice@srv:api/session2", "api");
-    registry.markOffline("alice@srv:api/session1");
-    registry.markOffline("alice@srv:api/session2");
+    await registry.markOffline("alice@srv:api/session1");
+    await registry.markOffline("alice@srv:api/session2");
     const result = registry.resolvePartial("alice@srv:api");
     expect("error" in result).toBe(true);
     if ("error" in result) {
@@ -142,7 +143,7 @@ describe("registry.resolvePartial", () => {
 
   it("online instance takes priority over offline with same prefix", async () => {
     await registry.register("alice@srv:api/old", "api");
-    registry.markOffline("alice@srv:api/old");
+    await registry.markOffline("alice@srv:api/old");
     await registry.register("alice@srv:api/new", "api");
     const result = registry.resolvePartial("alice@srv:api");
     // 1 online → resolve to online, no warning

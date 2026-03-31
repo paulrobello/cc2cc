@@ -253,7 +253,7 @@ export async function onPluginClose(ws: ServerWebSocket<WsData>): Promise<void> 
   const { instanceId } = ws.data;
   if (!instanceId) return;
 
-  registry.markOffline(instanceId);
+  await registry.markOffline(instanceId);
   registry.setWsRef(instanceId, null);
   broadcastManager.removePluginWs(instanceId);
   // Clean up rate limiter state for this connection
@@ -615,7 +615,7 @@ async function migrateRegistration(
   registry.setWsRef(newInstanceId, ws);
   broadcastManager.addPluginWs(newInstanceId, ws);
   // Deregister old identity only after new one is live
-  registry.markOffline(oldInstanceId);
+  await registry.markOffline(oldInstanceId);
   registry.setWsRef(oldInstanceId, null);
   broadcastManager.removePluginWs(oldInstanceId);
 }
