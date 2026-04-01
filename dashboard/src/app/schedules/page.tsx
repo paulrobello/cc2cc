@@ -82,7 +82,7 @@ function formatTimestamp(iso: string): string {
 }
 
 export default function SchedulesPage() {
-  const { schedules, refreshSchedules, topics, instances } = useWs();
+  const { schedules, refreshSchedules, topics, instances, sendMessage, sendBroadcast, sendPublishTopic } = useWs();
 
   useEffect(() => {
     refreshSchedules();
@@ -102,6 +102,7 @@ export default function SchedulesPage() {
   const [newPersistent, setNewPersistent] = useState(false);
   const [newMaxFires, setNewMaxFires] = useState("");
   const [newExpires, setNewExpires] = useState("");
+  const [fireNow, setFireNow] = useState(false);
 
   // Derived
   const scheduleList: ScheduleState[] = Array.from(schedules.values()).sort(
@@ -112,16 +113,28 @@ export default function SchedulesPage() {
   async function handleCreate() {
     if (!newName.trim() || !newExpr.trim() || !newTarget.trim() || !newContent.trim()) return;
     try {
+      const target = newTarget.trim();
+      const content = newContent.trim();
       await apiCreateSchedule({
         name: newName.trim(),
         expression: newExpr.trim(),
-        target: newTarget.trim(),
+        target,
         messageType: newMsgType,
-        content: newContent.trim(),
+        content,
         persistent: newPersistent,
         maxFireCount: newMaxFires ? Number(newMaxFires) : undefined,
         expiresAt: newExpires ? new Date(newExpires).toISOString() : undefined,
       });
+      // Fire immediately if requested
+      if (fireNow) {
+        if (target === "broadcast") {
+          await sendBroadcast(newMsgType, content);
+        } else if (target.startsWith("topic:")) {
+          await sendPublishTopic(target.slice("topic:".length), newMsgType, content, newPersistent);
+        } else {
+          await sendMessage(target, newMsgType, content);
+        }
+      }
       // Reset form
       setNewName("");
       setNewExpr("*/5 * * * *");
@@ -131,6 +144,7 @@ export default function SchedulesPage() {
       setNewPersistent(false);
       setNewMaxFires("");
       setNewExpires("");
+      setFireNow(false);
       setCreating(false);
       setError(null);
       await refreshSchedules();
@@ -310,14 +324,27 @@ export default function SchedulesPage() {
               className="w-full bg-transparent font-mono text-xs border rounded px-2 py-1 outline-none placeholder:text-[#3a5470]"
               style={{ borderColor: "#1a3356", color: "#e2e8f0" }}
             />
-            <input
-              value={newExpires}
-              onChange={(e) => setNewExpires(e.target.value)}
-              type="datetime-local"
-              placeholder="Expires at (optional)"
-              className="w-full bg-transparent font-mono text-xs border rounded px-2 py-1 outline-none"
-              style={{ borderColor: "#1a3356", color: "#6b8aaa", background: "#060d1a" }}
-            />
+            <div className="flex items-center gap-2">
+              <label className="font-mono text-[10px] shrink-0" style={{ color: "#3a5470" }}>Expires</label>
+              <input
+                value={newExpires}
+                onChange={(e) => setNewExpires(e.target.value)}
+                type="datetime-local"
+                className="flex-1 font-mono text-xs border rounded px-2 py-1 outline-none [color-scheme:dark]"
+                style={{ borderColor: "#1a3356", color: "#6b8aaa", background: "#060d1a" }}
+              />
+            </div>
+            <label
+              className="flex items-center gap-2 font-mono text-[10px]"
+              style={{ color: "#6b8aaa" }}
+            >
+              <input
+                type="checkbox"
+                checked={fireNow}
+                onChange={(e) => setFireNow(e.target.checked)}
+              />
+              fire immediately on create
+            </label>
             <button
               type="button"
               onClick={handleCreate}
