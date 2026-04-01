@@ -1,7 +1,7 @@
 // dashboard/src/app/schedules/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useWs } from "@/hooks/use-ws";
 import {
   createSchedule as apiCreateSchedule,
@@ -481,22 +481,20 @@ export default function SchedulesPage() {
                 ["Expires", selected.expiresAt ? new Date(selected.expiresAt).toLocaleString() : "—"],
                 ["Last fired", selected.lastFiredAt ? new Date(selected.lastFiredAt).toLocaleString() : "—"],
               ].map(([label, value]) => (
-                <>
+                <Fragment key={label}>
                   <span
-                    key={`label-${label}`}
                     className="font-mono text-[10px] uppercase tracking-wider"
                     style={{ color: "#3a5470" }}
                   >
                     {label}
                   </span>
                   <span
-                    key={`value-${label}`}
                     className="font-mono text-[10px] break-all"
                     style={{ color: "#6b8aaa" }}
                   >
                     {value}
                   </span>
-                </>
+                </Fragment>
               ))}
             </div>
 
