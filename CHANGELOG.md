@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Table of Contents
 
 - [Version Note](#version-note)
+- [0.3.1 — hub](#031--hub)
 - [0.3.0 — hub/plugin/dashboard](#030--hubplugindashboard)
 - [0.2.5 — hub](#025--hub)
 - [0.2.4 — plugin/dashboard](#024--plugindashboard)
@@ -28,12 +29,26 @@ The project maintains two version numbers that serve different purposes:
   after every change to the `skill/` directory because the plugin system caches by
   version number.
 
-- **`package.json` (root) version** (`0.3.0`) — the monorepo/release version. This
+- **`package.json` (root) version** (`0.3.1`) — the monorepo/release version. This
   tracks overall hub + plugin + dashboard releases intended for Docker deployment.
 
 The two versions are intentionally separate and will diverge over time. The skill
 version advances more frequently (each skill or pattern change requires a bump);
 the monorepo version advances with hub/plugin/dashboard releases.
+
+---
+
+## [0.3.1] — hub
+
+### Added
+- **Empty topic auto-expiry:** topics with `autoExpire: true` (default) are auto-deleted after `CC2CC_TOPIC_EMPTY_TTL` seconds (default 3600) when their last subscriber leaves. Project topics default to `autoExpire: false`. Pending deletions cancelled when a new subscriber joins. Recovery on hub restart re-schedules deletions for empty topics.
+- `autoExpire` field on `TopicInfo` interface and `TopicInfoSchema`
+- `CC2CC_TOPIC_EMPTY_TTL` environment variable (hub)
+
+### Documentation
+- Synced `docs/REST_API.md` — added 5 schedule endpoints, `autoExpire` on topics, 503 error
+- Synced `docs/ARCHITECTURE.md` — added scheduler module, schedule tools/actions/events, updated counts
+- Synced `docs/TROUBLESHOOTING.md` — fixed rate limit description and topic error reference
 
 ---
 
@@ -272,7 +287,8 @@ the monorepo version advances with hub/plugin/dashboard releases.
 - `SessionStart` hook writes Claude session ID to `.claude/.cc2cc-session-id` for stable instance identity
 - Partial addressing: send to `username@host:project` without session segment
 
-[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/paulrobello/cc2cc/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/paulrobello/cc2cc/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/paulrobello/cc2cc/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/paulrobello/cc2cc/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/paulrobello/cc2cc/compare/v0.2.3...v0.2.4

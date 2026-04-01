@@ -100,9 +100,9 @@ No build step — all other workspaces import directly from TypeScript source vi
 
 | Module | Contents |
 |--------|----------|
-| `src/types.ts` | `MessageType` enum, `Message` interface, `InstanceInfo` interface (with optional `role` field), `TopicInfo` interface, `parseProject()` helper, `toHttpUrl()` helper |
-| `src/schema.ts` | Zod schemas for all message shapes and MCP tool inputs; uses `z.nativeEnum(MessageType)` for enum alignment; exports `INSTANCE_ID_RE` canonical regex |
-| `src/events.ts` | `HubEvent` discriminated union — 13 event types emitted to dashboard clients, including topic and role events |
+| `src/types.ts` | `MessageType` enum, `Message` interface, `InstanceInfo` interface (with optional `role` field), `TopicInfo` interface (with optional `autoExpire` field), `Schedule` interface, `SYSTEM_SENDER_ID` constant, `parseProject()` helper, `toHttpUrl()` helper |
+| `src/schema.ts` | Zod schemas for all message shapes, MCP tool inputs, and `ScheduleSchema`; uses `z.nativeEnum(MessageType)` for enum alignment; exports `INSTANCE_ID_RE` canonical regex |
+| `src/events.ts` | `HubEvent` discriminated union — 17 event types emitted to dashboard clients, including topic, role, and schedule events (`schedule:created`, `schedule:updated`, `schedule:deleted`, `schedule:fired`) |
 | `src/index.ts` | Barrel re-export of all types, schemas, and events |
 
 > **Note:** Zod version is pinned to `^3`. Do not upgrade to v4 — it is incompatible with the shared schemas.
@@ -122,11 +122,12 @@ No build step — all other workspaces import directly from TypeScript source vi
 | `queue.ts` | RPOPLPUSH-based at-least-once delivery; max 1000 msgs/queue; daily stats counter (`stats:messages:today`) with EXPIREAT midnight UTC; queue migration for session updates |
 | `broadcast.ts` | `BroadcastManager` class: in-memory fan-out + per-instance 5 s rate limiter |
 | `topic-manager.ts` | Pub/sub topic lifecycle (create, delete, subscribe, unsubscribe, publish); persistent topic messages queued to offline subscribers; project topic auto-joined on connect; subscription migration for session updates |
-| `ws-handler.ts` | Plugin/dashboard WS lifecycle; message routing including role-based fan-out (`to: "role:<name>"`); per-connection rate limiting (60 msg / 10 s); role nudge on connect; handles 8 WS action types |
+| `scheduler.ts` | Cron-based scheduled message delivery; `Scheduler` class manages `Schedule` records in Redis; supports simple interval expressions (`every 5m`) and standard cron; fires messages through existing routing (direct, broadcast, topic, role); auto-deletes schedules that reach `maxFireCount` or `expiresAt` |
+| `ws-handler.ts` | Plugin/dashboard WS lifecycle; message routing including role-based fan-out (`to: "role:<name>"`); per-connection rate limiting (60 msg / 10 s); role nudge on connect; handles 13 WS action types (8 original + 5 schedule actions) |
 | `event-bus.ts` | Shared event infrastructure: `dashboardClients` set, `emitToDashboards()` helper, `broadcastManager` singleton; extracted to break circular dependency between `api.ts` and `ws-handler.ts` |
 | `api.ts` | REST handlers; `GET /health` is the only unauthenticated endpoint; all others require `Authorization: Bearer <key>` header (preferred) or `?key=` query param (fallback) |
 | `redis.ts` | Redis client setup (ioredis) with exponential backoff reconnect and health check helper |
-| `utils.ts` | Standalone `parseProject()` helper for extracting the project segment from an instance ID |
+| `utils.ts` | Standalone `parseProject()` helper for extracting the project segment from an instance ID; `sanitizeProjectTopic()` for converting project names into valid topic names |
 | `constants.ts` | `WS_OPEN` constant (WebSocket readyState = 1) used across hub modules |
 | `validation.ts` | Re-exports `INSTANCE_ID_RE` from `@cc2cc/shared` (single source of truth) |
 
@@ -134,7 +135,7 @@ No build step — all other workspaces import directly from TypeScript source vi
 
 ### plugin
 
-**Purpose:** MCP stdio server that connects to the hub and exposes ten Claude Code tools. One instance runs per Claude Code session.
+**Purpose:** MCP stdio server that connects to the hub and exposes 15 Claude Code tools. One instance runs per Claude Code session.
 
 | Module | Responsibility |
 |--------|---------------|
@@ -142,7 +143,7 @@ No build step — all other workspaces import directly from TypeScript source vi
 | `connection.ts` | `HubConnection`: WS client using the `ws` package; exponential backoff (1 s → ×2 → 30 s max); `request()` method with 10 s timeout |
 | `channel.ts` | Converts hub `message:sent` events into `notifications/claude/channel` MCP notifications with `source: "cc2cc"` in meta |
 | `session-watcher.ts` | Watches `.claude/.cc2cc-session-id` via `fs.watchFile` (poll-based, 2 s interval) for session changes (e.g. `/clear`); triggers `session_update` on the hub, replaces connection and tools with new identity; **disabled** when `CC2CC_SESSION_ID` is set (team mode) |
-| `tools.ts` | Ten MCP tools — `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic` |
+| `tools.ts` | 15 MCP tools — `list_instances`, `send_message`, `broadcast`, `get_messages`, `ping`, `set_role`, `subscribe_topic`, `unsubscribe_topic`, `list_topics`, `publish_topic`, `create_schedule`, `list_schedules`, `get_schedule`, `update_schedule`, `delete_schedule` |
 
 **Instance ID format:**
 
@@ -204,6 +205,7 @@ The UUID is generated once per browser session (stored in `sessionStorage`) and 
 | `src/app/analytics/page.tsx` | Stats bar + activity timeline |
 | `src/app/conversations/page.tsx` | Thread-grouped conversation view + message inspector |
 | `src/app/graph/page.tsx` | Network Graph: force-directed canvas visualization of instances, roles, and message traffic |
+| `src/app/schedules/page.tsx` | Schedules management: view, create, update, and delete scheduled message deliveries |
 | `src/lib/api.ts` | Typed fetch wrappers for hub REST; `AbortSignal.timeout(10_000)` on all calls; topic wrappers: `fetchTopics`, `createTopic`, `deleteTopic`, `subscribeToTopic`, `unsubscribeFromTopic` |
 
 ---
@@ -276,6 +278,11 @@ All frames are JSON objects with an `action` field. Every request frame carries 
 | `subscribe_topic` | `{ topic, requestId }` | `{ requestId, topic, subscribed: true }` |
 | `unsubscribe_topic` | `{ topic, requestId }` | `{ requestId, topic, unsubscribed: true }` or `{ requestId, error }` |
 | `publish_topic` | `{ topic, type, content, persistent?, metadata?, requestId }` | `{ requestId, delivered, queued }` |
+| `create_schedule` | `{ name, expression, target, messageType, content, persistent?, metadata?, maxFireCount?, expiresAt?, requestId }` | Full `Schedule` object |
+| `list_schedules` | `{ requestId }` | `{ requestId, schedules[] }` |
+| `get_schedule` | `{ scheduleId, requestId }` | Full `Schedule` object |
+| `update_schedule` | `{ scheduleId, ...updatable fields, requestId }` | Updated `Schedule` object |
+| `delete_schedule` | `{ scheduleId, requestId }` | `{ requestId, deleted: true, scheduleId }` |
 
 Inbound messages from the hub arrive as MCP `notifications/claude/channel` notifications:
 
@@ -306,6 +313,10 @@ Dashboards connect to `/ws/dashboard?key=<KEY>` and receive a stream of `HubEven
 | `topic:subscribed` | `{ name, instanceId, timestamp }` | Instance subscribes to a topic |
 | `topic:unsubscribed` | `{ name, instanceId, timestamp }` | Instance unsubscribes from a topic |
 | `topic:message` | `{ name, message, persistent, delivered, queued, timestamp }` | Message published to a topic |
+| `schedule:created` | `{ schedule, timestamp }` | New schedule created |
+| `schedule:updated` | `{ schedule, timestamp }` | Schedule modified |
+| `schedule:deleted` | `{ scheduleId, reason?, timestamp }` | Schedule deleted |
+| `schedule:fired` | `{ scheduleId, scheduleName, fireCount, nextFireAt, timestamp }` | Schedule fired a message |
 
 ---
 
@@ -320,6 +331,7 @@ Endpoint groups:
 - **Stats:** message counts and queue depths
 - **Queue:** flush an instance's queue (admin)
 - **Topics:** create, delete, subscribe, unsubscribe, list subscribers, and publish
+- **Schedules:** CRUD operations on scheduled message deliveries (`/api/schedules`)
 
 > **Note:** There are no REST endpoints for `send_message` or `broadcast`. All direct message delivery goes through the plugin WebSocket connection.
 

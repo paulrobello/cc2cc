@@ -14,6 +14,7 @@ Complete reference for the cc2cc hub REST API. All endpoints are served by the h
   - [Messages](#messages)
   - [Ping](#ping)
   - [Topics](#topics)
+  - [Schedules](#schedules)
 - [Security Headers](#security-headers)
 - [Error Responses](#error-responses)
 - [Related Documentation](#related-documentation)
@@ -222,7 +223,8 @@ List all topics with metadata and current subscriber counts.
     "name": "myproject",
     "createdAt": "2026-03-22T09:00:00.000Z",
     "createdBy": "alice@workstation:myproject/uuid",
-    "subscriberCount": 2
+    "subscriberCount": 2,
+    "autoExpire": true
   }
 ]
 ```
@@ -242,10 +244,13 @@ Create a topic. Idempotent — returns existing topic info if the topic already 
 **Request body:**
 
 ```json
-{ "name": "myproject-frontend" }
+{ "name": "myproject-frontend", "autoExpire": true }
 ```
 
-Topic names must match `/^[a-z0-9][a-z0-9_-]{0,63}$/` (lowercase alphanumeric, hyphens, and underscores; max 64 characters).
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | yes | Topic name matching `/^[a-z0-9][a-z0-9_-]{0,63}$/` (lowercase alphanumeric, hyphens, underscores; max 64 characters) |
+| `autoExpire` | `boolean` | no | Auto-delete when empty after TTL (default: `true`) |
 
 **Response:** `TopicInfo`
 
@@ -361,6 +366,135 @@ Publish a message to all subscribers of a topic. The `from` field is server-stam
 
 ---
 
+### Schedules
+
+The hub includes a built-in scheduler for recurring or one-shot messages. All schedule endpoints return `503` if the scheduler is not available.
+
+#### `POST /api/schedules`
+
+Create a new schedule. The `createdBy` field is server-stamped as `"dashboard"`.
+
+**Request body:**
+
+```json
+{
+  "name": "nightly-status",
+  "expression": "0 0 * * *",
+  "target": "topic:myproject",
+  "messageType": "task",
+  "content": "Please provide a status update",
+  "persistent": false,
+  "metadata": { "priority": "low" },
+  "maxFireCount": 30,
+  "expiresAt": "2026-12-31T23:59:59.000Z"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | yes | Human-readable label (1-100 characters) |
+| `expression` | `string` | yes | Cron expression or simple interval (max 128 characters) |
+| `target` | `string` | yes | Delivery target: instance ID, `"broadcast"`, `topic:<name>`, or `role:<name>` |
+| `messageType` | `string` | yes | One of: `task`, `result`, `question`, `ack`, `ping` |
+| `content` | `string` | yes | Message body |
+| `persistent` | `boolean` | no | Queue for offline subscribers on topic targets (default: `false`) |
+| `metadata` | `object` | no | Arbitrary key/value pairs |
+| `maxFireCount` | `number` | no | Auto-delete schedule after this many fires |
+| `expiresAt` | `string` | no | ISO 8601 timestamp; auto-delete when passed |
+
+**Response (201):** `Schedule`
+
+```json
+{
+  "scheduleId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "nightly-status",
+  "expression": "0 0 * * *",
+  "target": "topic:myproject",
+  "messageType": "task",
+  "content": "Please provide a status update",
+  "persistent": false,
+  "createdBy": "dashboard",
+  "createdAt": "2026-03-22T10:00:00.000Z",
+  "nextFireAt": "2026-03-23T00:00:00.000Z",
+  "fireCount": 0,
+  "maxFireCount": 30,
+  "expiresAt": "2026-12-31T23:59:59.000Z",
+  "enabled": true
+}
+```
+
+**Errors:**
+- `400` — invalid schedule payload (includes Zod validation `details`)
+- `503` — scheduler not available
+
+#### `GET /api/schedules`
+
+List all schedules.
+
+**Response:** `Schedule[]`
+
+#### `GET /api/schedules/:id`
+
+Get a single schedule by ID.
+
+**Path parameter:** `id` — URL-encoded schedule ID
+
+**Errors:**
+- `404` — schedule not found
+- `503` — scheduler not available
+
+**Response:** `Schedule`
+
+#### `PATCH /api/schedules/:id`
+
+Update an existing schedule. All fields are optional.
+
+**Path parameter:** `id` — URL-encoded schedule ID
+
+**Request body** (all fields optional):
+
+```json
+{
+  "name": "updated-name",
+  "expression": "*/30 * * * *",
+  "target": "broadcast",
+  "messageType": "result",
+  "content": "Updated content",
+  "persistent": true,
+  "metadata": { "updated": true },
+  "maxFireCount": null,
+  "expiresAt": null,
+  "enabled": false
+}
+```
+
+> **Note:** Setting `maxFireCount` or `expiresAt` to `null` clears the limit.
+
+**Errors:**
+- `400` — invalid update payload (includes Zod validation `details`)
+- `404` — schedule not found
+- `503` — scheduler not available
+
+**Response:** `Schedule`
+
+#### `DELETE /api/schedules/:id`
+
+Delete a schedule.
+
+**Path parameter:** `id` — URL-encoded schedule ID
+
+**Errors:**
+- `404` — schedule not found
+- `503` — scheduler not available
+
+**Response:**
+
+```json
+{ "deleted": true, "scheduleId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+```
+
+---
+
 ## Security Headers
 
 All REST responses include the following security headers:
@@ -391,6 +525,7 @@ All error responses use JSON with an `error` string field:
 | `401` | Unauthorized — missing or incorrect API key |
 | `404` | Not found — instance, topic, or resource does not exist |
 | `409` | Conflict — operation not permitted in current state (e.g. deleting a topic with subscribers, removing an online instance) |
+| `503` | Service unavailable — scheduler not available |
 
 ---
 

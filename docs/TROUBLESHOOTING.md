@@ -199,9 +199,9 @@ redis-cli keys "processing:*"
 
 ### Symptom: WebSocket frames rejected with "Rate limit exceeded. Max 60 messages per 10 seconds."
 
-**Cause:** A plugin sent more than 60 WebSocket frames within a 10-second sliding window. This per-connection rate limit protects the hub from runaway or misbehaving clients.
+**Cause:** A plugin sent more than 60 WebSocket frames within a 10-second fixed window. This per-instance rate limit protects the hub from runaway or misbehaving clients.
 
-**Fix:** Reduce the message frequency. If you are calling tools in a tight loop, add a short delay between calls. The limit is 60 frames per 10-second window per connection, which is sufficient for normal collaboration workflows.
+**Fix:** Reduce the message frequency. If you are calling tools in a tight loop, add a short delay between calls. The limit is 60 frames per 10-second window per instance, which is sufficient for normal collaboration workflows.
 
 ### Symptom: `broadcast()` rejected with "Rate limit exceeded. Max one broadcast per 5 seconds."
 
@@ -213,7 +213,7 @@ redis-cli keys "processing:*"
 
 ## Topics Issues
 
-### Symptom: `subscribe_topic()` fails with "cannot unsubscribe from auto-joined project topic"
+### Symptom: `unsubscribe_topic()` fails with "cannot unsubscribe from auto-joined project topic"
 
 **Cause:** You are calling `unsubscribe_topic()` on your project's auto-joined topic (the topic named after your project, e.g. `myproject`). This is a safety guard — automatic project topic subscriptions cannot be removed.
 

@@ -1,6 +1,6 @@
 # cc2cc Documentation
 
-This directory contains the technical reference documentation for the cc2cc hub-and-spoke communication system.
+Index of all project documentation for the cc2cc hub-and-spoke communication system, organized by audience and purpose.
 
 ## Documents
 
@@ -41,3 +41,9 @@ These files live in the project root:
 | [`CHANGELOG.md`](../CHANGELOG.md) | Version history in Keep a Changelog format |
 | [`SECURITY.md`](../SECURITY.md) | Threat model, known limitations, deployment constraints, and responsible disclosure |
 | [`ENHANCEMENTS.md`](../ENHANCEMENTS.md) | Ranked roadmap of planned features |
+
+---
+
+## Related Documentation
+
+- [CLAUDE.md](../CLAUDE.md) - AI assistant instructions and architecture reference for contributors using Claude Code

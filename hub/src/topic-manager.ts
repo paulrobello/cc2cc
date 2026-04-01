@@ -42,7 +42,9 @@ function _scheduleEmptyTopicDeletion(name: string): void {
     if (hash?.autoExpire === "false") return;
 
     await topicManager.deleteTopic(name);
-    console.log(`[topic-manager] auto-deleted empty topic "${name}" after ${TOPIC_EMPTY_TTL_SECONDS}s TTL`);
+    console.log(
+      `[topic-manager] auto-deleted empty topic "${name}" after ${TOPIC_EMPTY_TTL_SECONDS}s TTL`,
+    );
   }, TOPIC_EMPTY_TTL_SECONDS * 1000);
 
   _pendingDeletions.set(name, timer);
@@ -76,7 +78,12 @@ export const topicManager = {
     const now = new Date().toISOString();
     // Atomically create topic hash and add to topics:index Set
     const pipeline = redis.pipeline();
-    pipeline.hset(`topic:${name}`, { name, createdAt: now, createdBy, autoExpire: String(autoExpire) });
+    pipeline.hset(`topic:${name}`, {
+      name,
+      createdAt: now,
+      createdBy,
+      autoExpire: String(autoExpire),
+    });
     pipeline.sadd("topics:index", name);
     await pipeline.exec();
     return { name, createdAt: now, createdBy, subscriberCount: 0, autoExpire };
