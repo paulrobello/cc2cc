@@ -10,6 +10,14 @@ import {
 } from "@/lib/api";
 import { MessageType } from "@cc2cc/shared";
 import type { ScheduleState } from "@/types/dashboard";
+import { shortInstanceId } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 /** Convert common cron patterns to human-readable strings */
 function humanCron(expr: string): string {
@@ -74,7 +82,7 @@ function formatTimestamp(iso: string): string {
 }
 
 export default function SchedulesPage() {
-  const { schedules, refreshSchedules } = useWs();
+  const { schedules, refreshSchedules, topics, instances } = useWs();
 
   useEffect(() => {
     refreshSchedules();
@@ -207,13 +215,59 @@ export default function SchedulesPage() {
               className="w-full bg-transparent font-mono text-xs border rounded px-2 py-1 outline-none placeholder:text-[#3a5470]"
               style={{ borderColor: "#1a3356", color: "#e2e8f0" }}
             />
-            <input
+            <Select
               value={newTarget}
-              onChange={(e) => setNewTarget(e.target.value)}
-              placeholder="Target (broadcast, topic:name, instanceId)"
-              className="w-full bg-transparent font-mono text-xs border rounded px-2 py-1 outline-none placeholder:text-[#3a5470]"
-              style={{ borderColor: "#1a3356", color: "#e2e8f0" }}
-            />
+              onValueChange={(value: string | null) => {
+                if (value !== null) setNewTarget(value);
+              }}
+            >
+              <SelectTrigger
+                className="w-full h-7 font-mono text-xs"
+                style={{
+                  background: "#060d1a",
+                  border: "1px solid #1a3356",
+                  color: "#6b8aaa",
+                }}
+              >
+                <SelectValue placeholder="Select target" />
+              </SelectTrigger>
+              <SelectContent
+                style={{ background: "#0d1f38", border: "1px solid #1a3356" }}
+              >
+                {/* Topics */}
+                <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-widest" style={{ color: "#2a5480" }}>Topics</div>
+                {Array.from(topics.values()).sort((a, b) => a.name.localeCompare(b.name)).map((t) => (
+                  <SelectItem key={`topic:${t.name}`} value={`topic:${t.name}`}
+                    className="font-mono text-[11px]" style={{ color: "#a855f7" }}>
+                    ◈ {t.name} ({t.subscriberCount})
+                  </SelectItem>
+                ))}
+                {/* Online */}
+                <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-widest" style={{ color: "#2a5480" }}>Online</div>
+                <SelectItem value="broadcast" className="font-mono text-[11px]" style={{ color: "#a855f7" }}>
+                  ⬡ broadcast (all online)
+                </SelectItem>
+                {Array.from(instances.values()).filter((i) => i.status === "online")
+                  .sort((a, b) => a.instanceId.localeCompare(b.instanceId))
+                  .map((inst) => (
+                    <SelectItem key={inst.instanceId} value={inst.instanceId}
+                      className="font-mono text-[11px]" style={{ color: "#6b8aaa" }}>
+                      {shortInstanceId(inst.instanceId)}
+                      {inst.role && ` [${inst.role}]`}
+                    </SelectItem>
+                  ))}
+                {/* Offline */}
+                <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-widest" style={{ color: "#2a5480" }}>Offline</div>
+                {Array.from(instances.values()).filter((i) => i.status === "offline")
+                  .sort((a, b) => a.instanceId.localeCompare(b.instanceId))
+                  .map((inst) => (
+                    <SelectItem key={inst.instanceId} value={inst.instanceId}
+                      className="font-mono text-[11px]" style={{ color: "#3a5470" }}>
+                      {shortInstanceId(inst.instanceId)} (offline)
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
             <select
               value={newMsgType}
               onChange={(e) => setNewMsgType(e.target.value as MessageType)}
@@ -234,17 +288,19 @@ export default function SchedulesPage() {
               className="w-full bg-transparent font-mono text-xs border rounded p-2 outline-none resize-none placeholder:text-[#3a5470]"
               style={{ borderColor: "#1a3356", color: "#e2e8f0" }}
             />
-            <label
-              className="flex items-center gap-2 font-mono text-[10px]"
-              style={{ color: "#6b8aaa" }}
-            >
-              <input
-                type="checkbox"
-                checked={newPersistent}
-                onChange={(e) => setNewPersistent(e.target.checked)}
-              />
-              persistent
-            </label>
+            {newTarget.startsWith("topic:") && (
+              <label
+                className="flex items-center gap-2 font-mono text-[10px]"
+                style={{ color: "#6b8aaa" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={newPersistent}
+                  onChange={(e) => setNewPersistent(e.target.checked)}
+                />
+                persistent (deliver to offline subscribers)
+              </label>
+            )}
             <input
               value={newMaxFires}
               onChange={(e) => setNewMaxFires(e.target.value)}
