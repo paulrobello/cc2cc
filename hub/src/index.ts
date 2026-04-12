@@ -181,6 +181,7 @@ buildApiRoutes(app, scheduler);
 // `server` is kept in scope so that SIGTERM / SIGINT handlers can call server.stop().
 const server = Bun.serve<WsData>({
   port: config.port,
+  hostname: config.hostname,
   fetch(req, server) {
     const url = new URL(req.url);
 
@@ -245,7 +246,7 @@ const server = Bun.serve<WsData>({
   },
 });
 
-console.log(`[hub] listening on port ${config.port}`);
+console.log(`[hub] listening on ${config.hostname}:${config.port}`);
 
 // Graceful shutdown — stop accepting new connections then let the process exit.
 async function shutdown(signal: string): Promise<void> {

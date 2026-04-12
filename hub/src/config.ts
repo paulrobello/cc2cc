@@ -22,6 +22,8 @@ if (!dashboardOriginRaw) {
 
 export const config = {
   port: parseInt(process.env.CC2CC_HUB_PORT ?? "3100", 10),
+  /** Bind address. Defaults to 0.0.0.0 so the hub is reachable on the LAN. */
+  hostname: process.env.CC2CC_HUB_HOST ?? "0.0.0.0",
   apiKey: process.env.CC2CC_HUB_API_KEY ?? "",
   redisUrl: process.env.CC2CC_REDIS_URL ?? "redis://localhost:6379",
   /** Allowed CORS origin for the dashboard. Defaults to localhost:8029 if not set. */

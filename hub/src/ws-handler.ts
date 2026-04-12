@@ -194,10 +194,18 @@ export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
   // notifications are silently dropped because Claude Code isn't ready yet.
   setTimeout(async () => {
     const current = registry.get(instanceId);
-    if (!current || current.status !== "online") return;
+    if (!current || current.status !== "online") {
+      console.log(`[ws] skipping nudge for ${instanceId}: instance no longer online`);
+      return;
+    }
 
-    // Flush queued messages now that Claude Code is ready to receive notifications
-    await flushPendingQueue(instanceId, ws);
+    // Flush queued messages now that Claude Code is ready to receive notifications.
+    // Errors must not prevent the nudge from being sent.
+    try {
+      await flushPendingQueue(instanceId, ws);
+    } catch (err) {
+      console.error(`[ws] queue flush failed for ${instanceId}:`, err);
+    }
 
     // Wake-up nudge: send a connected message so the agent becomes active.
     // If the instance has no role, prompt it to set one; otherwise just confirm.
@@ -213,7 +221,12 @@ export async function onPluginOpen(ws: ServerWebSocket<WsData>): Promise<void> {
       content,
       timestamp: new Date().toISOString(),
     };
-    ws.send(JSON.stringify(nudge));
+    try {
+      ws.send(JSON.stringify(nudge));
+      console.log(`[ws] sent connection nudge to ${instanceId}`);
+    } catch (err) {
+      console.error(`[ws] failed to send nudge to ${instanceId}:`, err);
+    }
   }, 5_000);
 
   console.log(`[ws] plugin connected: ${instanceId}`);
