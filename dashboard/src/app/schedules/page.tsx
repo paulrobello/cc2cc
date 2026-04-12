@@ -91,6 +91,7 @@ export default function SchedulesPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // New schedule form state
@@ -103,6 +104,16 @@ export default function SchedulesPage() {
   const [newMaxFires, setNewMaxFires] = useState("");
   const [newExpires, setNewExpires] = useState("");
   const [fireNow, setFireNow] = useState(false);
+
+  // Edit form state
+  const [editName, setEditName] = useState("");
+  const [editExpr, setEditExpr] = useState("");
+  const [editTarget, setEditTarget] = useState("");
+  const [editMsgType, setEditMsgType] = useState<MessageType>(MessageType.task);
+  const [editContent, setEditContent] = useState("");
+  const [editPersistent, setEditPersistent] = useState(false);
+  const [editMaxFires, setEditMaxFires] = useState("");
+  const [editExpires, setEditExpires] = useState("");
 
   // Derived
   const scheduleList: ScheduleState[] = Array.from(schedules.values()).sort(
@@ -168,6 +179,45 @@ export default function SchedulesPage() {
     if (!selected) return;
     try {
       await apiUpdateSchedule(selected.scheduleId, { enabled: !selected.enabled });
+      setError(null);
+      await refreshSchedules();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function startEditing() {
+    if (!selected) return;
+    setEditName(selected.name);
+    setEditExpr(selected.expression);
+    setEditTarget(selected.target);
+    setEditMsgType(selected.messageType as MessageType);
+    setEditContent(selected.content);
+    setEditPersistent(selected.persistent);
+    setEditMaxFires(selected.maxFireCount != null ? String(selected.maxFireCount) : "");
+    setEditExpires(selected.expiresAt ? new Date(selected.expiresAt).toISOString().slice(0, 16) : "");
+    setEditing(true);
+  }
+
+  async function handleSaveEdit() {
+    if (!selected) return;
+    try {
+      const updates: Record<string, unknown> = {};
+      if (editName.trim() !== selected.name) updates.name = editName.trim();
+      if (editExpr.trim() !== selected.expression) updates.expression = editExpr.trim();
+      if (editTarget.trim() !== selected.target) updates.target = editTarget.trim();
+      if (editMsgType !== selected.messageType) updates.messageType = editMsgType;
+      if (editContent.trim() !== selected.content) updates.content = editContent.trim();
+      if (editPersistent !== selected.persistent) updates.persistent = editPersistent;
+      const newMax = editMaxFires ? Number(editMaxFires) : undefined;
+      if (newMax !== (selected.maxFireCount ?? undefined)) updates.maxFireCount = newMax ?? null;
+      const newExp = editExpires ? new Date(editExpires).toISOString() : undefined;
+      if (newExp !== (selected.expiresAt ?? undefined)) updates.expiresAt = newExp ?? null;
+
+      if (Object.keys(updates).length > 0) {
+        await apiUpdateSchedule(selected.scheduleId, updates);
+      }
+      setEditing(false);
       setError(null);
       await refreshSchedules();
     } catch (err) {
@@ -443,24 +493,40 @@ export default function SchedulesPage() {
             {selected ? selected.name : "Select a schedule"}
           </span>
           {selected && (
-            <button
-              type="button"
-              onClick={handleToggleEnabled}
-              className="font-mono text-[10px] px-3 py-1 rounded"
-              style={{
-                background: selected.enabled
-                  ? "rgba(248,113,113,0.1)"
-                  : "rgba(74,222,128,0.1)",
-                border: `1px solid ${selected.enabled ? "rgba(248,113,113,0.3)" : "rgba(74,222,128,0.3)"}`,
-                color: selected.enabled ? "#f87171" : "#4ade80",
-              }}
-            >
-              {selected.enabled ? "Disable" : "Enable"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => editing ? setEditing(false) : startEditing()}
+                className="font-mono text-[10px] px-3 py-1 rounded"
+                style={{
+                  background: editing
+                    ? "rgba(248,113,113,0.1)"
+                    : "rgba(0,212,255,0.1)",
+                  border: `1px solid ${editing ? "rgba(248,113,113,0.3)" : "rgba(0,212,255,0.3)"}`,
+                  color: editing ? "#f87171" : "#00d4ff",
+                }}
+              >
+                {editing ? "Cancel" : "Edit"}
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleEnabled}
+                className="font-mono text-[10px] px-3 py-1 rounded"
+                style={{
+                  background: selected.enabled
+                    ? "rgba(248,113,113,0.1)"
+                    : "rgba(74,222,128,0.1)",
+                  border: `1px solid ${selected.enabled ? "rgba(248,113,113,0.3)" : "rgba(74,222,128,0.3)"}`,
+                  color: selected.enabled ? "#f87171" : "#4ade80",
+                }}
+              >
+                {selected.enabled ? "Disable" : "Enable"}
+              </button>
+            </div>
           )}
         </div>
 
-        {selected && (
+        {selected && !editing && (
           <div className="flex-1 overflow-y-auto p-4">
             {/* Key-value grid */}
             <div
@@ -515,6 +581,175 @@ export default function SchedulesPage() {
             >
               {selected.content}
             </pre>
+          </div>
+        )}
+
+        {/* ── Edit form ──────────────────────────────────────────────── */}
+        {selected && editing && (
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex flex-col gap-3 max-w-lg">
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider mb-1 block" style={{ color: "#3a5470" }}>Name</label>
+                <input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-transparent font-mono text-xs border rounded px-2 py-1 outline-none"
+                  style={{ borderColor: "#1a3356", color: "#e2e8f0" }}
+                />
+              </div>
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider mb-1 block" style={{ color: "#3a5470" }}>Expression</label>
+                <input
+                  value={editExpr}
+                  onChange={(e) => setEditExpr(e.target.value)}
+                  className="w-full bg-transparent font-mono text-xs border rounded px-2 py-1 outline-none"
+                  style={{ borderColor: "#1a3356", color: "#e2e8f0" }}
+                />
+                <span className="font-mono text-[9px] mt-0.5 block" style={{ color: "#3a5470" }}>
+                  {humanCron(editExpr)}
+                </span>
+              </div>
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider mb-1 block" style={{ color: "#3a5470" }}>Target</label>
+                <Select
+                  value={editTarget}
+                  onValueChange={(value: string | null) => {
+                    if (value !== null) setEditTarget(value);
+                  }}
+                >
+                  <SelectTrigger
+                    className="w-full h-7 font-mono text-xs"
+                    style={{
+                      background: "#060d1a",
+                      border: "1px solid #1a3356",
+                      color: "#6b8aaa",
+                    }}
+                  >
+                    <SelectValue placeholder="Select target" />
+                  </SelectTrigger>
+                  <SelectContent
+                    style={{ background: "#0d1f38", border: "1px solid #1a3356" }}
+                  >
+                    <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-widest" style={{ color: "#2a5480" }}>Topics</div>
+                    {Array.from(topics.values()).sort((a, b) => a.name.localeCompare(b.name)).map((t) => (
+                      <SelectItem key={`topic:${t.name}`} value={`topic:${t.name}`}
+                        className="font-mono text-[11px]" style={{ color: "#a855f7" }}>
+                        ◈ {t.name} ({t.subscriberCount})
+                      </SelectItem>
+                    ))}
+                    <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-widest" style={{ color: "#2a5480" }}>Online</div>
+                    <SelectItem value="broadcast" className="font-mono text-[11px]" style={{ color: "#a855f7" }}>
+                      ⬡ broadcast (all online)
+                    </SelectItem>
+                    {Array.from(instances.values()).filter((i) => i.status === "online")
+                      .sort((a, b) => a.instanceId.localeCompare(b.instanceId))
+                      .map((inst) => (
+                        <SelectItem key={inst.instanceId} value={inst.instanceId}
+                          className="font-mono text-[11px]" style={{ color: "#6b8aaa" }}>
+                          {shortInstanceId(inst.instanceId)}
+                          {inst.role && ` [${inst.role}]`}
+                        </SelectItem>
+                      ))}
+                    <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-widest" style={{ color: "#2a5480" }}>Offline</div>
+                    {Array.from(instances.values()).filter((i) => i.status === "offline")
+                      .sort((a, b) => a.instanceId.localeCompare(b.instanceId))
+                      .map((inst) => (
+                        <SelectItem key={inst.instanceId} value={inst.instanceId}
+                          className="font-mono text-[11px]" style={{ color: "#3a5470" }}>
+                          {shortInstanceId(inst.instanceId)} (offline)
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider mb-1 block" style={{ color: "#3a5470" }}>Message Type</label>
+                <select
+                  value={editMsgType}
+                  onChange={(e) => setEditMsgType(e.target.value as MessageType)}
+                  className="w-full bg-transparent font-mono text-xs border rounded px-2 py-1 outline-none"
+                  style={{ borderColor: "#1a3356", color: "#6b8aaa", background: "#060d1a" }}
+                >
+                  {(["task", "result", "question", "ack"] as const).map((t) => (
+                    <option key={t} value={t} style={{ background: "#060d1a" }}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider mb-1 block" style={{ color: "#3a5470" }}>Content</label>
+                <textarea
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  rows={4}
+                  className="w-full bg-transparent font-mono text-xs border rounded p-2 outline-none resize-none"
+                  style={{ borderColor: "#1a3356", color: "#e2e8f0" }}
+                />
+              </div>
+              {editTarget.startsWith("topic:") && (
+                <label
+                  className="flex items-center gap-2 font-mono text-[10px]"
+                  style={{ color: "#6b8aaa" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={editPersistent}
+                    onChange={(e) => setEditPersistent(e.target.checked)}
+                  />
+                  persistent (deliver to offline subscribers)
+                </label>
+              )}
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider mb-1 block" style={{ color: "#3a5470" }}>Max Fires</label>
+                <input
+                  value={editMaxFires}
+                  onChange={(e) => setEditMaxFires(e.target.value)}
+                  placeholder="Unlimited"
+                  type="number"
+                  min="1"
+                  className="w-full bg-transparent font-mono text-xs border rounded px-2 py-1 outline-none placeholder:text-[#3a5470]"
+                  style={{ borderColor: "#1a3356", color: "#e2e8f0" }}
+                />
+              </div>
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider mb-1 block" style={{ color: "#3a5470" }}>Expires</label>
+                <input
+                  value={editExpires}
+                  onChange={(e) => setEditExpires(e.target.value)}
+                  type="datetime-local"
+                  className="w-full font-mono text-xs border rounded px-2 py-1 outline-none [color-scheme:dark]"
+                  style={{ borderColor: "#1a3356", color: "#6b8aaa", background: "#060d1a" }}
+                />
+              </div>
+              <div className="flex gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  disabled={!editName.trim() || !editExpr.trim() || !editTarget.trim() || !editContent.trim()}
+                  className="flex-1 py-1.5 font-mono text-[10px] uppercase tracking-wider rounded disabled:opacity-40"
+                  style={{
+                    background: "rgba(0,212,255,0.1)",
+                    border: "1px solid rgba(0,212,255,0.3)",
+                    color: "#00d4ff",
+                  }}
+                >
+                  Save Changes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  className="px-4 py-1.5 font-mono text-[10px] uppercase tracking-wider rounded"
+                  style={{
+                    background: "rgba(248,113,113,0.1)",
+                    border: "1px solid rgba(248,113,113,0.3)",
+                    color: "#f87171",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
